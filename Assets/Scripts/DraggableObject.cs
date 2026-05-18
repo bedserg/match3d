@@ -13,15 +13,33 @@ public class DraggableObject : MonoBehaviour
     // ── Constants ────────────────────────────────────────────────────────────
 
     private const string LogPrefix     = "[DraggableObject]";
-    private const float  ReturnDuration = 0.25f;
+
+    /// <summary>
+    /// Name of the physics layer assigned to an object while it is being dragged.
+    /// DropZone only accepts objects on this layer, preventing physics-driven entry.
+    /// </summary>
+    private const string DraggingLayer = "Dragging";
+
+    // ── Private cached layer indices ─────────────────────────────────────────
+
+    private int _defaultLayer;
+    private int _draggingLayer;
 
     // ── Inspector ────────────────────────────────────────────────────────────
 
     [Tooltip("Which object type this instance represents. Set in the prefab Inspector.")]
     [SerializeField] private ObjectType _objectType;
 
-    [Tooltip("How fast the object follows the cursor. Higher = snappier.")]
+    [Header("Drag Feel")]
+    [Tooltip("How fast the object follows the cursor. Higher = snappier, lower = floatier.")]
     [SerializeField] private float _followSpeed = 20f;
+
+    [Tooltip("Maximum horizontal speed (m/s) a settled, non-dragged object can reach from a collision impulse. " +
+             "Lower values keep nearby objects from flying when something is dragged past them.")]
+    [SerializeField] private float _maxIdleSpeed = 1.5f;
+
+    [Tooltip("Duration in seconds for the smooth return animation when a dragged object is rejected.")]
+    [SerializeField] private float _returnDuration = 0.25f;
 
     [Header("Drag Bounds")]
     [Tooltip("When enabled, dragging is clamped to the rectangle defined below.")]
@@ -86,6 +104,10 @@ public class DraggableObject : MonoBehaviour
         _rb.linearVelocity  = Vector3.zero;
         _rb.angularVelocity = Vector3.zero;
         _rb.position        = worldPosition;
+
+        // Object is seated — restore the default layer so it no longer triggers
+        // the DropZone's dragging-only acceptance gate.
+        gameObject.layer = _defaultLayer;
     }
 
     /// <summary>
@@ -118,8 +140,7 @@ public class DraggableObject : MonoBehaviour
     {
         Debug.Log($"{LogPrefix} ReturnToDragStart on '{name}' — target={_dragStartPosition}");
         StopAllCoroutines();
-        StartCoroutine(ReturnCoroutine(_dragStartPosition));
-    }
+        StartCoroutine(ReturnCoroutine(_dragStartPosition));    }
 
     // ── Private state ────────────────────────────────────────────────────────
 
@@ -131,8 +152,9 @@ public class DraggableObject : MonoBehaviour
     private bool      _isSettled;
 
     private Vector3 _dragStartPosition;
-    private Plane   _dragPlane;
+    private Plane _dragPlane;
     private Vector3 _grabOffset;
+    private Quaternion _dragRotation = Quaternion.identity;
 
     // ── Unity lifecycle ──────────────────────────────────────────────────────
 
@@ -143,6 +165,13 @@ public class DraggableObject : MonoBehaviour
         _cam = Camera.main;
 
         _dragPlane = new Plane(Vector3.up, transform.position);
+
+        _defaultLayer  = gameObject.layer;
+        _draggingLayer = LayerMask.NameToLayer(DraggingLayer);
+
+        if (_draggingLayer < 0)
+            Debug.LogError($"{LogPrefix} Layer '{DraggingLayer}' not found. " +
+                           "Add it in Project Settings > Tags & Layers.", this);
 
         // Objects placed directly in the scene (not via ObjectSpawner) are considered
         // already settled so they can be dragged immediately.
@@ -163,7 +192,15 @@ public class DraggableObject : MonoBehaviour
 
         _dragStartPosition = transform.position;
         _dragPlane         = new Plane(Vector3.up, transform.position);
-        _isDragging        = true;
+        _isDragging = true;
+        _dragRotation = Quaternion.Euler(0f, 0f, 0f);
+        _rb.MoveRotation(_dragRotation);
+        transform.rotation = _dragRotation;
+
+        // Switch to the Dragging layer so DropZone can distinguish intentional drags
+        // from physics-driven overlaps.
+        if (_draggingLayer >= 0)
+            gameObject.layer = _draggingLayer;
 
         Vector3 hitPoint = ScreenToPlane(Input.mousePosition);
         _grabOffset       = transform.position - hitPoint;
@@ -177,6 +214,10 @@ public class DraggableObject : MonoBehaviour
     {
         Debug.Log($"{LogPrefix} OnMouseUp on '{name}' — was dragging={_isDragging}");
         _isDragging = false;
+
+        // Restore the original layer so the object is no longer treated as "being dragged".
+        gameObject.layer = _defaultLayer;
+
         StopMotion();
     }
 
@@ -188,26 +229,42 @@ public class DraggableObject : MonoBehaviour
 
     private void FixedUpdate()
     {
-        if (!_isDragging) return;
-
-        Vector3 cursorWorld = ScreenToPlane(Input.mousePosition);
-        if (cursorWorld == Vector3.zero)
+        if (_isDragging)
         {
-            Debug.LogWarning($"{LogPrefix} ScreenToPlane returned zero — ray missed the drag plane.");
-            return;
+            Vector3 cursorWorld = ScreenToPlane(Input.mousePosition);
+            if (cursorWorld == Vector3.zero)
+            {
+                Debug.LogWarning($"{LogPrefix} ScreenToPlane returned zero — ray missed the drag plane.");
+                return;
+            }
+
+            Vector3 target = cursorWorld + _grabOffset;
+            target.y = _rb.position.y;
+
+            if (_useDragBounds)
+            {
+                target.x = Mathf.Clamp(target.x, _minX, _maxX);
+                target.z = Mathf.Clamp(target.z, _minZ, _maxZ);
+            }
+
+            Vector3 next = Vector3.Lerp(_rb.position, target, _followSpeed * Time.fixedDeltaTime);
+            _rb.MovePosition(next);
+            _rb.MoveRotation(_dragRotation);
         }
-
-        Vector3 target = cursorWorld + _grabOffset;
-        target.y = _rb.position.y;
-
-        if (_useDragBounds)
+        else if (_isSettled && !_isLocked)
         {
-            target.x = Mathf.Clamp(target.x, _minX, _maxX);
-            target.z = Mathf.Clamp(target.z, _minZ, _maxZ);
+            // Clamp horizontal velocity so collision impulses from a nearby dragged
+            // object cannot propel this one far across the board.
+            Vector3 vel = _rb.linearVelocity;
+            float   sqr = vel.x * vel.x + vel.z * vel.z;
+            if (sqr > _maxIdleSpeed * _maxIdleSpeed)
+            {
+                float scale    = _maxIdleSpeed / Mathf.Sqrt(sqr);
+                vel.x         *= scale;
+                vel.z         *= scale;
+                _rb.linearVelocity = vel;
+            }
         }
-
-        Vector3 next = Vector3.Lerp(_rb.position, target, _followSpeed * Time.fixedDeltaTime);
-        _rb.MovePosition(next);
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────
@@ -220,10 +277,10 @@ public class DraggableObject : MonoBehaviour
         Vector3 start   = _rb.position;
         float   elapsed = 0f;
 
-        while (elapsed < ReturnDuration)
+        while (elapsed < _returnDuration)
         {
             elapsed += Time.deltaTime;
-            float t      = Mathf.Clamp01(elapsed / ReturnDuration);
+            float t      = Mathf.Clamp01(elapsed / _returnDuration);
             float smooth = t * t * (3f - 2f * t);
             _rb.MovePosition(Vector3.Lerp(start, target, smooth));
             yield return null;

@@ -31,9 +31,25 @@ public class FruitSpawner : MonoBehaviour
 
     private const string LogPrefix            = "[FruitSpawner]";
     private const int    MaxPlacementRetries  = 30;
-    private const float  SettleVelocityThreshold = 0.08f; // m/s — considered at rest below this
+    private const float  SettleVelocityThreshold = 0.05f; // m/s — considered at rest below this
     private const float  SettleMinWait        = 0.5f;     // s   — always wait at least this long
     private const float  SettleMaxWait        = 6f;       // s   — give up waiting after this long
+
+    /// <summary>
+    /// Linear damping applied to settled fruits so collision impulses from a dragged
+    /// neighbour are absorbed quickly rather than launching them across the board.
+    /// </summary>
+    private const float  SettledLinearDamping  = 12f;
+
+    /// <summary>Angular damping applied after settling to stop unwanted spinning.</summary>
+    private const float  SettledAngularDamping = 20f;
+
+    /// <summary>
+    /// Maximum horizontal speed (m/s) a settled fruit can reach from a collision.
+    /// Applied every FixedUpdate by <see cref="DraggableFruit"/> when not dragging.
+    /// Defined here as a documentation reference — the actual cap lives in DraggableFruit.
+    /// </summary>
+    private const float  MaxIdleSpeed          = 1.5f;
 
     private static readonly int BaseColorID = Shader.PropertyToID("_BaseColor");
 
@@ -281,6 +297,10 @@ public class FruitSpawner : MonoBehaviour
         rb.constraints     = RigidbodyConstraints.FreezePositionY
                            | RigidbodyConstraints.FreezeRotationX
                            | RigidbodyConstraints.FreezeRotationZ;
+
+        // High damping absorbs collision impulses quickly so fruits don't fly far.
+        rb.linearDamping  = SettledLinearDamping;
+        rb.angularDamping = SettledAngularDamping;
 
         // Notify DraggableFruit that the fruit has finished falling.
         fruit?.OnSettled();

@@ -17,6 +17,23 @@ public class DraggableFruit : MonoBehaviour
     /// <summary>Duration of the smooth return-to-start animation in seconds.</summary>
     private const float ReturnDuration = 0.25f;
 
+    /// <summary>
+    /// Maximum horizontal speed (m/s) for a settled, non-dragged fruit.
+    /// Prevents collision impulses from a dragged neighbour launching this fruit far.
+    /// </summary>
+    private const float MaxIdleSpeed = 1.5f;
+
+    /// <summary>
+    /// Name of the physics layer assigned to a fruit while it is being dragged.
+    /// DropZone only accepts objects on this layer, preventing physics-driven entry.
+    /// </summary>
+    private const string DraggingLayer = "Dragging";
+
+    // ── Private cached layer indices ─────────────────────────────────────────
+
+    private int _defaultLayer;
+    private int _draggingLayer;
+
     // ── Inspector ────────────────────────────────────────────────────────────
 
     [Tooltip("Which fruit this object represents.")]
@@ -74,6 +91,10 @@ public class DraggableFruit : MonoBehaviour
         _rb.linearVelocity = Vector3.zero;
         _rb.angularVelocity = Vector3.zero;
         _rb.position       = worldPosition;
+
+        // Fruit is seated — restore the default layer so it no longer triggers
+        // the DropZone's dragging-only acceptance gate.
+        gameObject.layer = _defaultLayer;
     }
 
     /// <summary>
@@ -142,6 +163,13 @@ public class DraggableFruit : MonoBehaviour
         // Safe default so _dragPlane is never uninitialized.
         _dragPlane = new Plane(Vector3.up, transform.position);
 
+        _defaultLayer  = gameObject.layer;
+        _draggingLayer = LayerMask.NameToLayer(DraggingLayer);
+
+        if (_draggingLayer < 0)
+            Debug.LogError($"{LogPrefix} Layer '{DraggingLayer}' not found. " +
+                           "Add it in Project Settings > Tags & Layers.", this);
+
         // Fruits placed directly in the scene (not via FruitSpawner) are considered
         // already settled so they can be dragged immediately.
         _isSettled = true;
@@ -168,6 +196,11 @@ public class DraggableFruit : MonoBehaviour
         _dragPlane  = new Plane(Vector3.up, transform.position);
         _isDragging = true;
 
+        // Switch to the Dragging layer so DropZone can distinguish intentional drags
+        // from physics-driven overlaps.
+        if (_draggingLayer >= 0)
+            gameObject.layer = _draggingLayer;
+
         Vector3 hitPoint = ScreenToPlane(Input.mousePosition);
         Debug.Log($"{LogPrefix} Grab hit point={hitPoint}, fruit pos={transform.position}");
 
@@ -182,6 +215,10 @@ public class DraggableFruit : MonoBehaviour
     {
         Debug.Log($"{LogPrefix} OnMouseUp on '{name}' — was dragging={_isDragging}");
         _isDragging = false;
+
+        // Restore the original layer so the fruit is no longer treated as "being dragged".
+        gameObject.layer = _defaultLayer;
+
         StopMotion();
     }
 
@@ -195,20 +232,35 @@ public class DraggableFruit : MonoBehaviour
 
     private void FixedUpdate()
     {
-        if (!_isDragging) return;
-
-        Vector3 cursorWorld = ScreenToPlane(Input.mousePosition);
-        if (cursorWorld == Vector3.zero)
+        if (_isDragging)
         {
-            Debug.LogWarning($"{LogPrefix} ScreenToPlane returned zero — ray missed the drag plane.");
-            return;
+            Vector3 cursorWorld = ScreenToPlane(Input.mousePosition);
+            if (cursorWorld == Vector3.zero)
+            {
+                Debug.LogWarning($"{LogPrefix} ScreenToPlane returned zero — ray missed the drag plane.");
+                return;
+            }
+
+            Vector3 target = cursorWorld + _grabOffset;
+            target.y = _rb.position.y; // keep the fruit on its original Y level
+
+            Vector3 next = Vector3.Lerp(_rb.position, target, _followSpeed * Time.fixedDeltaTime);
+            _rb.MovePosition(next);
         }
-
-        Vector3 target = cursorWorld + _grabOffset;
-        target.y = _rb.position.y; // keep the fruit on its original Y level
-
-        Vector3 next = Vector3.Lerp(_rb.position, target, _followSpeed * Time.fixedDeltaTime);
-        _rb.MovePosition(next);
+        else if (_isSettled && !_isLocked)
+        {
+            // Clamp horizontal velocity to prevent a collision impulse from a nearby
+            // dragged fruit from sending this one flying off the board.
+            Vector3 vel = _rb.linearVelocity;
+            float   sqr = vel.x * vel.x + vel.z * vel.z;
+            if (sqr > MaxIdleSpeed * MaxIdleSpeed)
+            {
+                float scale    = MaxIdleSpeed / Mathf.Sqrt(sqr);
+                vel.x         *= scale;
+                vel.z         *= scale;
+                _rb.linearVelocity = vel;
+            }
+        }
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────

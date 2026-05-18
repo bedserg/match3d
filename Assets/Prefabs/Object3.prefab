@@ -58,11 +58,11 @@ Rigidbody:
     m_Bits: 0
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
-  m_UseGravity: 0
+  m_UseGravity: 1
   m_IsKinematic: 0
   m_Interpolate: 1
   m_Constraints: 0
-  m_CollisionDetection: 3
+  m_CollisionDetection: 2
 --- !u!135 &6990478396571919186
 SphereCollider:
   m_ObjectHideFlags: 0
@@ -82,8 +82,8 @@ SphereCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Radius: 0.5
-  m_Center: {x: 0, y: 0, z: 0}
+  m_Radius: 0.56915677
+  m_Center: {x: 0.069156766, y: 0, z: 0}
 --- !u!114 &8164916267362495069
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -111,6 +111,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _objectType: 2
   _followSpeed: 20
+  _useDragBounds: 1
+  _minX: -3.4
+  _maxX: 3.4
+  _minZ: -5.9
+  _maxZ: 5.9
 --- !u!1001 &2698817958059314186
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -145,31 +150,31 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: a55aac12359b8114bb41c0fec28480a6, type: 3}
       propertyPath: m_LocalRotation.w
-      value: 0.29165396
+      value: -0.057103597
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: a55aac12359b8114bb41c0fec28480a6, type: 3}
       propertyPath: m_LocalRotation.x
-      value: -0.29165396
+      value: -0.22680081
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: a55aac12359b8114bb41c0fec28480a6, type: 3}
       propertyPath: m_LocalRotation.y
-      value: 0.6441568
+      value: 0.14000973
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: a55aac12359b8114bb41c0fec28480a6, type: 3}
       propertyPath: m_LocalRotation.z
-      value: 0.6441568
+      value: 0.9621319
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: a55aac12359b8114bb41c0fec28480a6, type: 3}
       propertyPath: m_LocalEulerAnglesHint.x
-      value: -90
+      value: -165.906
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: a55aac12359b8114bb41c0fec28480a6, type: 3}
       propertyPath: m_LocalEulerAnglesHint.y
-      value: 0
+      value: 152.195
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: a55aac12359b8114bb41c0fec28480a6, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
-      value: 131.281
+      value: 10.298004
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: a55aac12359b8114bb41c0fec28480a6, type: 3}
       propertyPath: m_ConstrainProportionsScale
@@ -178,6 +183,10 @@ PrefabInstance:
     - target: {fileID: 919132149155446097, guid: a55aac12359b8114bb41c0fec28480a6, type: 3}
       propertyPath: m_Name
       value: Meshy_AI_Pensive_Chick_0516183149_texture
+      objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: a55aac12359b8114bb41c0fec28480a6, type: 3}
+      propertyPath: m_Layer
+      value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []

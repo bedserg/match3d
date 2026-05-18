@@ -33,10 +33,14 @@ public class DropZone : MonoBehaviour
 
     // ── Constants ────────────────────────────────────────────────────────────
 
-    private const string ObjectTag = "Object"; // keep the existing Unity tag; rename in Project Settings if desired
-    private const int    SlotCount = 2;
+    private const string ObjectTag    = "Object"; // keep the existing Unity tag; rename in Project Settings if desired
+    private const int    SlotCount    = 2;
+    private const string DraggingLayerName = "Dragging";
 
     // ── Private state ─────────────────────────────────────────────────────────
+
+    /// <summary>Cached index of the Dragging physics layer. -1 if the layer does not exist.</summary>
+    private int _draggingLayerIndex = -1;
 
     /// <summary>
     /// Fixed-size slot array. Index 0 = left slot, index 1 = right slot.
@@ -85,6 +89,11 @@ public class DropZone : MonoBehaviour
 
         if (_objectSpawner == null)
             _objectSpawner = FindFirstObjectByType<ObjectSpawner>();
+
+        _draggingLayerIndex = LayerMask.NameToLayer(DraggingLayerName);
+        if (_draggingLayerIndex < 0)
+            Debug.LogWarning($"[DropZone] Layer '{DraggingLayerName}' not found. " +
+                             "Objects will fall back to IsDragging check only.", this);
     }
 
     private void OnTriggerEnter(Collider other)
@@ -125,7 +134,13 @@ public class DropZone : MonoBehaviour
         // Still falling — not ready to be placed yet.
         if (!obj.IsSettled) return;
 
-        // Not being dragged — ignore physics-driven overlaps.
+        // Hard gate: only accept objects that are on the Dragging layer.
+        // DraggableObject switches to this layer on OnMouseDown and restores
+        // the original layer on OnMouseUp / Lock, so a physics-driven overlap
+        // from a non-dragged object can never reach this point.
+        if (_draggingLayerIndex >= 0 && other.gameObject.layer != _draggingLayerIndex) return;
+
+        // Fallback check (also covers edge cases when the layer was not created).
         if (!obj.IsDragging) return;
 
         // Both slots already occupied — let the player drag it away.

@@ -43,9 +43,21 @@ public class ObjectSpawner : MonoBehaviour
 
     private const string LogPrefix               = "[ObjectSpawner]";
     private const int    MaxPlacementRetries      = 30;
-    private const float  SettleVelocityThreshold  = 0.18f;
-    private const float  SettleMinWait            = 0.2f;
-    private const float  SettleMaxWait            = 3f;
+    private const float  SettleVelocityThreshold  = 0.05f;
+    private const float  SettleMinWait            = 0.3f;
+    private const float  SettleMaxWait            = 5f;
+
+    /// <summary>
+    /// Linear damping applied to all settled objects so that collision impulses
+    /// from the dragged object are absorbed quickly and do not send them flying.
+    /// </summary>
+    private const float  SettledLinearDamping     = 12f;
+
+    /// <summary>
+    /// Angular damping applied to settled objects to stop unwanted spinning
+    /// caused by physics collisions during gameplay.
+    /// </summary>
+    private const float  SettledAngularDamping    = 20f;
 
     // ── Inspector ────────────────────────────────────────────────────────────
 
@@ -469,6 +481,10 @@ public class ObjectSpawner : MonoBehaviour
         rb.constraints     = RigidbodyConstraints.FreezePositionY
                            | RigidbodyConstraints.FreezeRotationX
                            | RigidbodyConstraints.FreezeRotationZ;
+
+        // High damping keeps pushed objects from flying far after a collision.
+        rb.linearDamping  = SettledLinearDamping;
+        rb.angularDamping = SettledAngularDamping;
 
         obj?.OnSettled();
 
