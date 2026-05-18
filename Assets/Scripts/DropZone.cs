@@ -4,15 +4,15 @@ using UnityEngine;
 /// <summary>
 /// Represents a hole with two logical slots (left = index 0, right = index 1).
 ///
-/// Empty-hole rule   : An empty hole accepts any FruitType.
-/// Type-locking rule : Once the first fruit is placed, the hole locks to that
-///                     FruitType and rejects all others until it is cleared.
-/// Two-slot rule     : The hole holds at most 2 fruits. A third fruit is always
+/// Empty-hole rule   : An empty hole accepts any ObjectType.
+/// Type-locking rule : Once the first object is placed, the hole locks to that
+///                     ObjectType and rejects all others until it is cleared.
+/// Two-slot rule     : The hole holds at most 2 objects. A third is always
 ///                     rejected regardless of type.
 /// Match rule        : When both slots are filled (always a matching pair thanks
-///                     to type-locking), both fruits are destroyed and the hole
+///                     to type-locking), both objects are destroyed and the hole
 ///                     resets to the empty state.
-/// Wrong-fruit rule  : A fruit of the wrong type may physically enter the trigger
+/// Wrong-object rule : An object of the wrong type may physically enter the trigger
 ///                     while being dragged, but it is never stored in a slot. If
 ///                     released inside the trigger it is smoothly returned to the
 ///                     position it was grabbed from.
@@ -28,34 +28,34 @@ public class DropZone : MonoBehaviour
     [Tooltip("World-space anchor for the right slot (index 1). Assign a child Transform.")]
     [SerializeField] private Transform _rightSlotAnchor;
 
-    [Tooltip("Reference to the FruitSpawner so it can be notified when a pair is destroyed.")]
-    [SerializeField] private FruitSpawner _fruitSpawner;
+    [Tooltip("Reference to the ObjectSpawner so it can be notified when a pair is destroyed.")]
+    [SerializeField] private ObjectSpawner _objectSpawner;
 
     // ── Constants ────────────────────────────────────────────────────────────
 
-    private const string FruitTag  = "Fruit";
+    private const string ObjectTag = "Object"; // keep the existing Unity tag; rename in Project Settings if desired
     private const int    SlotCount = 2;
 
-    // ── Private state ────────────────────────────────────────────────────────
+    // ── Private state ─────────────────────────────────────────────────────────
 
     /// <summary>
     /// Fixed-size slot array. Index 0 = left slot, index 1 = right slot.
     /// A null entry means the slot is empty.
     /// </summary>
-    private readonly DraggableFruit[] _slots = new DraggableFruit[SlotCount];
+    private readonly DraggableObject[] _slots = new DraggableObject[SlotCount];
 
     /// <summary>
-    /// The FruitType this hole is locked to, or null when the hole is empty
-    /// and therefore accepts any fruit.
+    /// The ObjectType this hole is locked to, or null when the hole is empty
+    /// and therefore accepts any object.
     /// </summary>
-    private FruitType? _lockedType;
+    private ObjectType? _lockedType;
 
     /// <summary>
-    /// Fruits currently overlapping the trigger that are of the wrong type while
+    /// Objects currently overlapping the trigger that are of the wrong type while
     /// the zone is locked. Tracked so we can detect when the player releases them
     /// inside the zone and return them to their drag-start position.
     /// </summary>
-    private readonly HashSet<DraggableFruit> _wrongFruitsInside = new HashSet<DraggableFruit>();
+    private readonly HashSet<DraggableObject> _wrongObjectsInside = new HashSet<DraggableObject>();
 
     // ── Public API ───────────────────────────────────────────────────────────
 
@@ -63,16 +63,15 @@ public class DropZone : MonoBehaviour
     public bool IsEmpty => _slots[0] == null && _slots[1] == null;
 
     /// <summary>True when both slots are occupied.</summary>
-    public bool IsFull  => _slots[0] != null && _slots[1] != null;
+    public bool IsFull => _slots[0] != null && _slots[1] != null;
 
-    /// <summary>The locked FruitType, or null when the hole is empty.</summary>
-    public FruitType? LockedType => _lockedType;
+    /// <summary>The locked ObjectType, or null when the hole is empty.</summary>
+    public ObjectType? LockedType => _lockedType;
 
     // ── Unity lifecycle ──────────────────────────────────────────────────────
 
     private void Awake()
     {
-        // Enforce trigger mode so the hole collider does not block fruits.
         Collider col = GetComponent<Collider>();
         if (!col.isTrigger)
         {
@@ -80,98 +79,93 @@ public class DropZone : MonoBehaviour
             Debug.LogWarning($"[DropZone] Collider on '{name}' was not a trigger — fixed automatically.", this);
         }
 
-        // Warn early if anchors are not assigned so the designer catches it in Edit Mode.
         if (_leftSlotAnchor == null || _rightSlotAnchor == null)
             Debug.LogWarning($"[DropZone] '{name}' is missing one or both slot anchors. " +
                              "Assign LeftSlotAnchor and RightSlotAnchor in the Inspector.", this);
 
-        // Auto-resolve the spawner if not wired in the Inspector.
-        if (_fruitSpawner == null)
-            _fruitSpawner = FindFirstObjectByType<FruitSpawner>();
+        if (_objectSpawner == null)
+            _objectSpawner = FindFirstObjectByType<ObjectSpawner>();
     }
 
     private void OnTriggerEnter(Collider other)
     {
-        TryAcceptFruit(other);
+        TryAcceptObject(other);
     }
 
     private void OnTriggerStay(Collider other)
     {
-        // A fruit may have settled while already overlapping the trigger (e.g. it fell
+        // An object may have settled while already overlapping the trigger (e.g. it fell
         // through, bounced, and came to rest inside the zone before the player drags it).
         // Re-evaluate on every stay tick so it gets accepted once the player drags it in.
-        TryAcceptFruit(other);
+        TryAcceptObject(other);
 
-        // ── Wrong-fruit release detection ──────────────────────────────────────
-        // If a wrong fruit (tracked in _wrongFruitsInside) was just released by the
-        // player while still overlapping this trigger, return it to its drag-start pos.
-        if (!other.CompareTag(FruitTag)) return;
-        if (!other.TryGetComponent(out DraggableFruit wrongFruit)) return;
-        if (!_wrongFruitsInside.Contains(wrongFruit)) return;
+        // ── Wrong-object release detection ────────────────────────────────────
+        if (!other.CompareTag(ObjectTag)) return;
+        if (!other.TryGetComponent(out DraggableObject wrongObject)) return;
+        if (!_wrongObjectsInside.Contains(wrongObject)) return;
 
-        if (!wrongFruit.IsDragging)
+        if (!wrongObject.IsDragging)
         {
-            Debug.Log($"[DropZone] Wrong fruit '{wrongFruit.name}' released inside '{name}' — returning to drag start.");
-            _wrongFruitsInside.Remove(wrongFruit);
-            wrongFruit.ReturnToDragStart();
+            Debug.Log($"[DropZone] Wrong object '{wrongObject.name}' released inside '{name}' — returning to drag start.");
+            _wrongObjectsInside.Remove(wrongObject);
+            wrongObject.ReturnToDragStart();
         }
     }
 
     /// <summary>
     /// Core acceptance logic, shared between <see cref="OnTriggerEnter"/> and
-    /// <see cref="OnTriggerStay"/>. A fruit is accepted only when it is settled
+    /// <see cref="OnTriggerStay"/>. An object is accepted only when it is settled
     /// AND the player is actively dragging it, preventing physics-driven auto-acceptance.
     /// </summary>
-    private void TryAcceptFruit(Collider other)
+    private void TryAcceptObject(Collider other)
     {
-        if (!other.CompareTag(FruitTag)) return;
-        if (!other.TryGetComponent(out DraggableFruit fruit)) return;
+        if (!other.CompareTag(ObjectTag)) return;
+        if (!other.TryGetComponent(out DraggableObject obj)) return;
 
-        // ── Ignore fruits that are still falling — not settled yet.
-        if (!fruit.IsSettled) return;
+        // Still falling — not ready to be placed yet.
+        if (!obj.IsSettled) return;
 
-        // ── Ignore fruits the player is not actively dragging.
-        // This prevents physics collisions or rolling from auto-accepting a fruit.
-        if (!fruit.IsDragging) return;
+        // Not being dragged — ignore physics-driven overlaps.
+        if (!obj.IsDragging) return;
 
-        // ── Ignore: both slots already occupied — let the player drag it away.
+        // Both slots already occupied — let the player drag it away.
         if (IsFull) return;
 
-        // ── Wrong type while locked — track but never store; ReturnToDragStart on release.
-        if (_lockedType.HasValue && fruit.FruitType != _lockedType.Value)
+        // Wrong type while locked — track but never store; ReturnToDragStart on release.
+        if (_lockedType.HasValue && obj.ObjectType != _lockedType.Value)
         {
-            _wrongFruitsInside.Add(fruit);
+            _wrongObjectsInside.Add(obj);
             return;
         }
 
-        // ── Already in a slot (accepted on a previous tick) — do not double-place.
-        if (FindSlotIndex(fruit) >= 0) return;
+        // Already in a slot (accepted on a previous tick) — do not double-place.
+        if (FindSlotIndex(obj) >= 0) return;
 
-        // ── Place fruit in the first empty slot (left before right).
+        // Place in the first empty slot (left before right).
         int slotIndex = FirstEmptySlotIndex();
-        _slots[slotIndex] = fruit;
+        _slots[slotIndex] = obj;
 
-        // ── If it was previously tracked as wrong (shouldn't happen, but be safe), remove it.
-        _wrongFruitsInside.Remove(fruit);
+        // If it was previously tracked as wrong (shouldn't happen, but be safe), remove it.
+        _wrongObjectsInside.Remove(obj);
 
-        Debug.Log($"[DropZone] '{fruit.FruitType}' accepted into slot {slotIndex} of '{name}'. " +
+        Debug.Log($"[DropZone] '{obj.ObjectType}' accepted into slot {slotIndex} of '{name}'. " +
                   $"slots[0]={_slots[0]?.name ?? "empty"}  slots[1]={_slots[1]?.name ?? "empty"}");
 
-        // ── Lock the hole to this fruit's type on first placement.
+        // Lock the hole to this object's type on first placement.
         if (!_lockedType.HasValue)
         {
-            _lockedType = fruit.FruitType;
+            _lockedType = obj.ObjectType;
             Debug.Log($"[DropZone] '{name}' locked to type '{_lockedType}'.");
         }
 
-        // ── Snap and freeze the fruit at its slot anchor so physics cannot displace it.
-        fruit.Lock(SlotAnchorPosition(slotIndex));
+        // Snap and freeze the object at its slot anchor so physics cannot displace it.
+        obj.Lock(SlotAnchorPosition(slotIndex));
 
-        OnFruitEntered(fruit, slotIndex);
+        OnObjectEntered(obj, slotIndex);
 
         Debug.Log($"[DropZone] IsFull={IsFull}  (slots[0]={_slots[0]?.name ?? "null"}, slots[1]={_slots[1]?.name ?? "null"})");
 
-        // ── Both slots are now filled — type-lock guarantees a valid pair.
+        // Both slots are now filled — type-lock guarantees a valid pair.
         if (IsFull)
         {
             Debug.Log($"[DropZone] Both slots filled — calling DestroyMatchedPair() for type '{_lockedType}'.");
@@ -181,37 +175,33 @@ public class DropZone : MonoBehaviour
 
     private void OnTriggerExit(Collider other)
     {
-        if (!other.CompareTag(FruitTag)) return;
-        if (!other.TryGetComponent(out DraggableFruit fruit)) return;
+        if (!other.CompareTag(ObjectTag)) return;
+        if (!other.TryGetComponent(out DraggableObject obj)) return;
 
-        // ── A wrong fruit has left the trigger on its own — no longer needs tracking.
-        if (_wrongFruitsInside.Remove(fruit))
+        // A wrong object has left the trigger on its own — no longer needs tracking.
+        if (_wrongObjectsInside.Remove(obj))
         {
-            Debug.Log($"[DropZone] Wrong fruit '{fruit.name}' exited '{name}' — removed from tracking.");
+            Debug.Log($"[DropZone] Wrong object '{obj.name}' exited '{name}' — removed from tracking.");
             return;
         }
 
-        // fruit.Lock() teleports the fruit to the slot anchor position.
+        // obj.Lock() teleports the object to the slot anchor position.
         // If that anchor sits outside the trigger collider, Unity fires OnTriggerExit
-        // immediately after placement. Ignore the exit for any locked fruit so it
+        // immediately after placement. Ignore the exit for any locked object so it
         // stays in its slot and IsFull can become true.
-        if (fruit.IsLocked) return;
+        if (obj.IsLocked) return;
 
-        // Locate which slot held this fruit (it may not be in a slot if ignored).
-        int slotIndex = FindSlotIndex(fruit);
+        int slotIndex = FindSlotIndex(obj);
         if (slotIndex < 0) return;
 
-        // Free the slot.
         _slots[slotIndex] = null;
 
-        // Restore dynamic physics so the fruit can be dragged or pushed again.
-        fruit.Unlock();
+        obj.Unlock();
 
-        // Release the type-lock when the last fruit leaves.
         if (IsEmpty)
             _lockedType = null;
 
-        OnFruitExited(fruit, slotIndex);
+        OnObjectExited(obj, slotIndex);
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────
@@ -240,28 +230,28 @@ public class DropZone : MonoBehaviour
     }
 
     /// <summary>
-    /// Returns the slot index containing <paramref name="fruit"/>,
+    /// Returns the slot index containing <paramref name="obj"/>,
     /// or -1 if it is not in any slot.
     /// </summary>
-    private int FindSlotIndex(DraggableFruit fruit)
+    private int FindSlotIndex(DraggableObject obj)
     {
         for (int i = 0; i < SlotCount; i++)
         {
-            if (_slots[i] == fruit) return i;
+            if (_slots[i] == obj) return i;
         }
         return -1;
     }
 
     /// <summary>
-    /// Destroys both slotted fruits and resets the hole to an empty state.
-    /// The type-lock guarantees both fruits share the same FruitType, so no
+    /// Destroys both slotted objects and resets the hole to an empty state.
+    /// The type-lock guarantees both objects share the same ObjectType, so no
     /// additional type check is needed here.
     /// </summary>
     private void DestroyMatchedPair()
     {
-        DraggableFruit left  = _slots[0];
-        DraggableFruit right = _slots[1];
-        FruitType      type  = _lockedType.Value; // always set when a fruit is in a slot
+        DraggableObject left  = _slots[0];
+        DraggableObject right = _slots[1];
+        ObjectType      type  = _lockedType.Value;
 
         Debug.Log($"[DropZone] Matched pair of '{type}' in '{name}' — destroying both.");
 
@@ -270,8 +260,6 @@ public class DropZone : MonoBehaviour
         _slots[1]   = null;
         _lockedType = null;
 
-        // Delegate the actual Destroy calls to a virtual method so subclasses
-        // can intercept here and play a match animation before destroying.
         ExecutePairDestruction(left, right, type);
     }
 
@@ -281,44 +269,41 @@ public class DropZone : MonoBehaviour
     /// Performs the actual destruction of a matched pair.
     /// Override in a subclass to play a match animation before destroying —
     /// state has already been cleared so the hole is logically empty at this point.
-    /// Call <c>Destroy</c> on both GameObjects and <see cref="OnMatchedPairDestroyed"/>
-    /// at the end of your animation.
     /// </summary>
-    /// <param name="left">The fruit in the left slot.</param>
-    /// <param name="right">The fruit in the right slot.</param>
-    /// <param name="fruitType">The shared FruitType of the pair.</param>
-    protected virtual void ExecutePairDestruction(DraggableFruit left, DraggableFruit right, FruitType fruitType)
+    /// <param name="left">The object in the left slot.</param>
+    /// <param name="right">The object in the right slot.</param>
+    /// <param name="objectType">The shared ObjectType of the pair.</param>
+    protected virtual void ExecutePairDestruction(DraggableObject left, DraggableObject right, ObjectType objectType)
     {
-        // Notify the spawner before destroying so it can remove the references while they are still valid.
-        _fruitSpawner?.OnFruitsDestroyed(left, right);
+        _objectSpawner?.OnObjectsDestroyed(left, right);
 
         Destroy(left.gameObject);
         Destroy(right.gameObject);
-        OnMatchedPairDestroyed(fruitType);
+        OnMatchedPairDestroyed(objectType);
     }
 
     /// <summary>
-    /// Called when a fruit is successfully accepted into a slot.
+    /// Called when an object is successfully accepted into a slot.
     /// Override to update slot visuals, highlight indicators, etc.
     /// </summary>
-    /// <param name="fruit">The fruit that was placed.</param>
+    /// <param name="obj">The object that was placed.</param>
     /// <param name="slotIndex">0 = left slot, 1 = right slot.</param>
-    protected virtual void OnFruitEntered(DraggableFruit fruit, int slotIndex)
+    protected virtual void OnObjectEntered(DraggableObject obj, int slotIndex)
     {
-        Debug.Log($"[DropZone] '{fruit.FruitType}' placed in slot {slotIndex} of '{name}'. " +
+        Debug.Log($"[DropZone] '{obj.ObjectType}' placed in slot {slotIndex} of '{name}'. " +
                   $"Locked type: {_lockedType}");
     }
 
     /// <summary>
-    /// Called when a fruit leaves the zone without being part of a matched pair
+    /// Called when an object leaves the zone without being part of a matched pair
     /// (e.g. the player dragged it back out).
     /// Override to revert slot visuals.
     /// </summary>
-    /// <param name="fruit">The fruit that exited.</param>
+    /// <param name="obj">The object that exited.</param>
     /// <param name="slotIndex">The slot it previously occupied.</param>
-    protected virtual void OnFruitExited(DraggableFruit fruit, int slotIndex)
+    protected virtual void OnObjectExited(DraggableObject obj, int slotIndex)
     {
-        Debug.Log($"[DropZone] '{fruit.FruitType}' removed from slot {slotIndex} of '{name}'. " +
+        Debug.Log($"[DropZone] '{obj.ObjectType}' removed from slot {slotIndex} of '{name}'. " +
                   $"Hole is now {(IsEmpty ? "empty" : "partially filled")}.");
     }
 
@@ -326,9 +311,9 @@ public class DropZone : MonoBehaviour
     /// Called after a matched pair has been destroyed and the hole has fully reset.
     /// Override to trigger scoring, particle effects, audio, etc.
     /// </summary>
-    /// <param name="fruitType">The type of the pair that was cleared.</param>
-    protected virtual void OnMatchedPairDestroyed(FruitType fruitType)
+    /// <param name="objectType">The type of the pair that was cleared.</param>
+    protected virtual void OnMatchedPairDestroyed(ObjectType objectType)
     {
-        Debug.Log($"[DropZone] Pair of '{fruitType}' cleared from '{name}' — hole is now empty.");
+        Debug.Log($"[DropZone] Pair of '{objectType}' cleared from '{name}' — hole is now empty.");
     }
 }
