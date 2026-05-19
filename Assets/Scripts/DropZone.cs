@@ -219,6 +219,73 @@ public class DropZone : MonoBehaviour
         OnObjectExited(obj, slotIndex);
     }
 
+    /// <summary>
+    /// Places <paramref name="obj"/> into this hole programmatically, bypassing the
+    /// drag/trigger requirements of the normal flow. Intended for tap-to-place logic.
+    ///
+    /// Applies the same slot rules as the drag path:
+    /// empty hole accepts any type; a partially-filled hole only accepts the locked type;
+    /// a full hole rejects immediately.
+    /// </summary>
+    /// <param name="obj">The object to place.</param>
+    /// <returns>True when the object was accepted and locked into a slot.</returns>
+    public bool TryAutoPlaceObject(DraggableObject obj)
+    {
+        if (obj == null)
+        {
+            Debug.LogWarning("[DropZone] TryAutoPlaceObject called with a null object.");
+            return false;
+        }
+
+        if (!obj.IsSettled)
+        {
+            Debug.Log($"[DropZone] TryAutoPlaceObject rejected '{obj.name}' — not yet settled.");
+            return false;
+        }
+
+        if (IsFull)
+        {
+            Debug.Log($"[DropZone] TryAutoPlaceObject rejected '{obj.name}' — '{name}' is full.");
+            return false;
+        }
+
+        if (_lockedType.HasValue && obj.ObjectType != _lockedType.Value)
+        {
+            Debug.Log($"[DropZone] TryAutoPlaceObject rejected '{obj.name}' " +
+                      $"(type={obj.ObjectType}) — '{name}' is locked to '{_lockedType}'.");
+            return false;
+        }
+
+        // Already in a slot — do not double-place.
+        if (FindSlotIndex(obj) >= 0)
+        {
+            Debug.Log($"[DropZone] TryAutoPlaceObject skipped '{obj.name}' — already in a slot.");
+            return false;
+        }
+
+        int slotIndex = FirstEmptySlotIndex();
+        _slots[slotIndex] = obj;
+
+        if (!_lockedType.HasValue)
+        {
+            _lockedType = obj.ObjectType;
+            Debug.Log($"[DropZone] '{name}' locked to type '{_lockedType}' via TryAutoPlaceObject.");
+        }
+
+        obj.Lock(SlotAnchorPosition(slotIndex));
+        OnObjectEntered(obj, slotIndex);
+
+        Debug.Log($"[DropZone] TryAutoPlaceObject placed '{obj.name}' into slot {slotIndex} of '{name}'.");
+
+        if (IsFull)
+        {
+            Debug.Log($"[DropZone] Both slots filled via auto-place — calling DestroyMatchedPair().");
+            DestroyMatchedPair();
+        }
+
+        return true;
+    }
+
     // ── Private helpers ──────────────────────────────────────────────────────
 
     /// <summary>

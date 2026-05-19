@@ -41,6 +41,19 @@ public class DraggableObject : MonoBehaviour
     [Tooltip("Duration in seconds for the smooth return animation when a dragged object is rejected.")]
     [SerializeField] private float _returnDuration = 0.25f;
 
+    [Header("Tap Detection")]
+    [Tooltip("Maximum finger/cursor movement in pixels for an interaction to count as a tap.")]
+    [SerializeField] private float _tapMoveThresholdPixels = 15f;
+
+    [Tooltip("Maximum duration in seconds for an interaction to count as a tap.")]
+    [SerializeField] private float _tapMaxDuration = 0.25f;
+
+    [Tooltip("Duration in seconds for the smooth auto-move animation when a tapped object flies to a drop zone.")]
+    [SerializeField] private float _autoMoveDuration = 0.25f;
+
+    [Tooltip("Drop zone this object flies to on a tap. Auto-resolved at runtime if left empty.")]
+    [SerializeField] private DropZone _dropZone;
+
     [Header("Drag Bounds")]
     [Tooltip("When enabled, dragging is clamped to the rectangle defined below.")]
     [SerializeField] private bool _useDragBounds = true;
@@ -140,7 +153,39 @@ public class DraggableObject : MonoBehaviour
     {
         Debug.Log($"{LogPrefix} ReturnToDragStart on '{name}' — target={_dragStartPosition}");
         StopAllCoroutines();
-        StartCoroutine(ReturnCoroutine(_dragStartPosition));    }
+        StartCoroutine(ReturnCoroutine(_dragStartPosition));
+    }
+
+    /// <summary>
+    /// Smoothly moves the object to <paramref name="targetPosition"/>, then re-enables physics.
+    /// Use this for programmatic repositioning (e.g. tap-to-place rejection) where the
+    /// destination is known at call time rather than recorded from a drag.
+    /// </summary>
+    /// <param name="targetPosition">World-space position to animate the object toward.</param>
+    public void ReturnToPosition(Vector3 targetPosition)
+    {
+        Debug.Log($"{LogPrefix} ReturnToPosition on '{name}' — target={targetPosition}");
+        StopAllCoroutines();
+        StartCoroutine(ReturnCoroutine(targetPosition));
+    }
+
+    /// <summary>
+    /// Smoothly flies the object to <paramref name="dropZone"/> and attempts to place it there.
+    /// If placement succeeds, <see cref="DropZone"/> handles locking and destruction.
+    /// If placement fails (zone full, wrong type, etc.), the object animates back to its
+    /// current position via <see cref="ReturnToPosition"/>.
+    /// No-ops when the object is null, locked, or not yet settled.
+    /// </summary>
+    /// <param name="dropZone">The drop zone to attempt placement into.</param>
+    public void AutoMoveToDropZone(DropZone dropZone)
+    {
+        if (dropZone == null)   return;
+        if (_isLocked)          return;
+        if (!_isSettled)        return;
+
+        StopAllCoroutines();
+        StartCoroutine(AutoMoveCoroutine(dropZone));
+    }
 
     // ── Private state ────────────────────────────────────────────────────────
 
@@ -150,11 +195,15 @@ public class DraggableObject : MonoBehaviour
     private bool      _isDragging;
     private bool      _isLocked;
     private bool      _isSettled;
+    private bool      _isAutoMoving;
 
     private Vector3 _dragStartPosition;
     private Plane _dragPlane;
     private Vector3 _grabOffset;
     private Quaternion _dragRotation = Quaternion.identity;
+
+    private Vector2 _mouseDownScreenPos;
+    private float   _mouseDownTime;
 
     // ── Unity lifecycle ──────────────────────────────────────────────────────
 
@@ -172,6 +221,13 @@ public class DraggableObject : MonoBehaviour
         if (_draggingLayer < 0)
             Debug.LogError($"{LogPrefix} Layer '{DraggingLayer}' not found. " +
                            "Add it in Project Settings > Tags & Layers.", this);
+
+        if (_dropZone == null)
+            _dropZone = FindFirstObjectByType<DropZone>();
+
+        if (_dropZone == null)
+            Debug.LogWarning($"{LogPrefix} No DropZone found in the scene. " +
+                             "Tap-to-place will not work on '{name}'.", this);
 
         // Objects placed directly in the scene (not via ObjectSpawner) are considered
         // already settled so they can be dragged immediately.
@@ -197,6 +253,10 @@ public class DraggableObject : MonoBehaviour
         _rb.MoveRotation(_dragRotation);
         transform.rotation = _dragRotation;
 
+        // Record tap-detection state.
+        _mouseDownScreenPos = Input.mousePosition;
+        _mouseDownTime      = Time.unscaledTime;
+
         // Switch to the Dragging layer so DropZone can distinguish intentional drags
         // from physics-driven overlaps.
         if (_draggingLayer >= 0)
@@ -213,11 +273,26 @@ public class DraggableObject : MonoBehaviour
     private void OnMouseUp()
     {
         Debug.Log($"{LogPrefix} OnMouseUp on '{name}' — was dragging={_isDragging}");
+
+        float movedPixels = Vector2.Distance(Input.mousePosition, _mouseDownScreenPos);
+        float heldSeconds = Time.unscaledTime - _mouseDownTime;
+        bool  isTap       = movedPixels <= _tapMoveThresholdPixels && heldSeconds <= _tapMaxDuration;
+
         _isDragging = false;
 
-        // Restore the original layer so the object is no longer treated as "being dragged".
-        gameObject.layer = _defaultLayer;
+        if (isTap)
+        {
+            Debug.Log($"{LogPrefix} Tap detected on object — auto-moving to drop zone.");
 
+            _isDragging      = false;
+            gameObject.layer = _defaultLayer;
+            StopMotion();
+            AutoMoveToDropZone(_dropZone);
+            return;
+        }
+
+        // Drag release — keep existing behavior.
+        gameObject.layer = _defaultLayer;
         StopMotion();
     }
 
@@ -229,6 +304,8 @@ public class DraggableObject : MonoBehaviour
 
     private void FixedUpdate()
     {
+        if (_isAutoMoving) return;
+
         if (_isDragging)
         {
             Vector3 cursorWorld = ScreenToPlane(Input.mousePosition);
@@ -268,6 +345,47 @@ public class DraggableObject : MonoBehaviour
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────
+
+    private IEnumerator AutoMoveCoroutine(DropZone dropZone)
+    {
+        Vector3 originalPosition = _rb.position;
+
+        _isDragging    = false;
+        _isAutoMoving  = true;
+        _rb.isKinematic = true;
+        StopMotion();
+
+        Debug.Log($"{LogPrefix} AutoMove started on '{name}' — target zone='{dropZone.name}'");
+
+        Vector3 start       = _rb.position;
+        Vector3 destination = dropZone.transform.position;
+        float   elapsed     = 0f;
+
+        while (elapsed < _autoMoveDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t      = Mathf.Clamp01(elapsed / _autoMoveDuration);
+            float smooth = t * t * (3f - 2f * t);
+            _rb.MovePosition(Vector3.Lerp(start, destination, smooth));
+            yield return null;
+        }
+
+        _rb.MovePosition(destination);
+
+        bool placed = dropZone.TryAutoPlaceObject(this);
+        Debug.Log($"{LogPrefix} AutoMove — TryAutoPlaceObject returned {placed} on '{name}'");
+
+        if (!placed)
+        {
+            // DropZone rejected the object — undo kinematic so ReturnToPosition can animate.
+            _rb.isKinematic = false;
+            ReturnToPosition(originalPosition);
+        }
+        // On success, DropZone.Lock() has already made the Rigidbody kinematic and
+        // positioned the object at the slot anchor; nothing more to do here.
+
+        _isAutoMoving = false;
+    }
 
     private IEnumerator ReturnCoroutine(Vector3 target)
     {
