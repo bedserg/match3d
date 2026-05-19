@@ -82,8 +82,8 @@ SphereCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Radius: 0.4754042
-  m_Center: {x: 0, y: -0.067783535, z: 0}
+  m_Radius: 0.49
+  m_Center: {x: -0.03, y: -0.03, z: 0}
 --- !u!114 &9105647966793357004
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -111,6 +111,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _objectType: 1
   _followSpeed: 20
+  _maxIdleSpeed: 1.5
+  _returnDuration: 0.25
   _useDragBounds: 1
   _minX: -3.4
   _maxX: 3.4
