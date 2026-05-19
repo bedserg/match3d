@@ -286,6 +286,29 @@ public class DropZone : MonoBehaviour
         return true;
     }
 
+    /// <summary>
+    /// Returns the world-space position the object should visually fly toward during
+    /// a tap auto-move animation. This is a preview only — actual slot assignment is
+    /// decided by <see cref="TryAutoPlaceObject"/> after the animation completes.
+    /// </summary>
+    /// <param name="obj">The object about to be auto-moved.</param>
+    public Vector3 GetPreviewAutoSlotPosition(DraggableObject obj)
+    {
+        if (obj == null)
+            return transform.position;
+
+        if (IsEmpty)
+            return SlotAnchorPosition(0);
+
+        if (IsFull)
+            return transform.position;
+
+        // One slot occupied — always preview the right slot, regardless of type match.
+        // A wrong-type object will animate there and then return, which gives clear
+        // visual feedback that the zone rejected it.
+        return SlotAnchorPosition(1);
+    }
+
     // ── Private helpers ──────────────────────────────────────────────────────
 
     /// <summary>

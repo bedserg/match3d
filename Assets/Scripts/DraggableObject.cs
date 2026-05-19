@@ -241,8 +241,9 @@ public class DraggableObject : MonoBehaviour
 
     private void OnMouseDown()
     {
-        if (_isLocked)   return;
-        if (!_isSettled) return;
+        if (_isLocked)      return;
+        if (!_isSettled)    return;
+        if (_isAutoMoving)  return;
 
         Debug.Log($"{LogPrefix} OnMouseDown fired on '{name}' (type={_objectType})");
 
@@ -272,6 +273,8 @@ public class DraggableObject : MonoBehaviour
 
     private void OnMouseUp()
     {
+        if (_isAutoMoving) return;
+
         Debug.Log($"{LogPrefix} OnMouseUp on '{name}' — was dragging={_isDragging}");
 
         float movedPixels = Vector2.Distance(Input.mousePosition, _mouseDownScreenPos);
@@ -358,7 +361,7 @@ public class DraggableObject : MonoBehaviour
         Debug.Log($"{LogPrefix} AutoMove started on '{name}' — target zone='{dropZone.name}'");
 
         Vector3 start       = _rb.position;
-        Vector3 destination = dropZone.transform.position;
+        Vector3 destination = dropZone.GetPreviewAutoSlotPosition(this);
         float   elapsed     = 0f;
 
         while (elapsed < _autoMoveDuration)
