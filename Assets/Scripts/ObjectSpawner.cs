@@ -120,6 +120,10 @@ public class ObjectSpawner : MonoBehaviour
              "spawning and disabled automatically once all objects have settled.")]
     [SerializeField] private GameObject _dropZoneBlocker;
 
+    [Header("UI")]
+    [Tooltip("Reference to the UIManager. Auto-resolved via FindFirstObjectByType if left empty.")]
+    [SerializeField] private UIManager _uiManager;
+
     // ── Public properties ────────────────────────────────────────────────────
 
     /// <summary>Number of matched pairs that will be (or were) spawned.</summary>
@@ -133,12 +137,19 @@ public class ObjectSpawner : MonoBehaviour
     /// <summary>
     /// Called by <see cref="DropZone"/> after it destroys a matched pair so the
     /// spawner can keep its live-object list accurate.
+    /// Notifies <see cref="UIManager"/> when every object has been matched.
     /// </summary>
     public void OnObjectsDestroyed(DraggableObject left, DraggableObject right)
     {
         _liveObjects.Remove(left);
         _liveObjects.Remove(right);
         Debug.Log($"{LogPrefix} Pair removed — {_liveObjects.Count} object(s) remaining.");
+
+        if (_liveObjects.Count == 0)
+        {
+            Debug.Log($"{LogPrefix} All objects matched — notifying UIManager.");
+            _uiManager?.OnAllObjectsMatched();
+        }
     }
 
     // ── Private state ─────────────────────────────────────────────────────────
@@ -151,6 +162,9 @@ public class ObjectSpawner : MonoBehaviour
 
     private void Start()
     {
+        if (_uiManager == null)
+            _uiManager = FindFirstObjectByType<UIManager>();
+
         if (!ValidateConfig()) return;
         SpawnPairs();
     }

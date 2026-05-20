@@ -1,11 +1,14 @@
 using System.Collections;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 /// <summary>
-/// Manages the countdown timer UI.
+/// Manages the countdown timer UI and end-game panels.
 /// Counts down from a configurable start time, flashes red during the
 /// final warning period, and stops cleanly at zero.
+/// Shows <see cref="levelUpWindow"/> when all objects are matched before time runs out,
+/// or <see cref="timeIsUpWindow"/> when the countdown reaches zero with objects remaining.
 /// </summary>
 public class UIManager : MonoBehaviour
 {
@@ -14,6 +17,13 @@ public class UIManager : MonoBehaviour
     [Header("Timer UI")]
     [Tooltip("Drag your timer Text UI object here.")]
     public Text timerText;
+
+    [Header("End-Game Windows")]
+    [Tooltip("Panel shown when the player matches all objects before time runs out.")]
+    [SerializeField] private GameObject levelUpWindow;
+
+    [Tooltip("Panel shown when time runs out and objects are still remaining.")]
+    [SerializeField] private GameObject timeIsUpWindow;
 
     [Header("Timer Settings")]
     [Tooltip("Starting minutes for the countdown.")]
@@ -37,6 +47,9 @@ public class UIManager : MonoBehaviour
     /// True while the timer is actively counting down.
     private bool isRunning;
 
+    /// Set to true when the player wins before time is up, to skip the time-is-up panel.
+    private bool isGameOver;
+
     /// Cached reference to the flash coroutine so it can be stopped cleanly.
     private Coroutine flashCoroutine;
 
@@ -58,10 +71,58 @@ public class UIManager : MonoBehaviour
         if (timerText != null)
             timerText.color = ColorWhite;
 
-        isRunning = true;
+        // Hide end-game windows at start.
+        SetWindowActive(levelUpWindow, false);
+        SetWindowActive(timeIsUpWindow, false);
+
+        isRunning  = true;
+        isGameOver = false;
 
         // Kick off the per-second tick.
         StartCoroutine(CountdownCoroutine());
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Public API
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called by <see cref="ObjectSpawner"/> when every object has been matched
+    /// and destroyed. Stops the timer and shows the Level Up window.
+    /// </summary>
+    public void OnAllObjectsMatched()
+    {
+        if (isGameOver) return;
+
+        isGameOver = true;
+        isRunning  = false;
+
+        StopFlash();
+        UpdateTimerDisplay();
+
+        SetWindowActive(levelUpWindow, true);
+
+        Debug.Log("[UIManager] All objects matched — showing LevelUpWindow.");
+    }
+
+    /// <summary>
+    /// Stops the countdown immediately without triggering any end-game window.
+    /// Useful for pausing or resetting the game state externally.
+    /// </summary>
+    public void StopTimer()
+    {
+        isRunning = false;
+        StopFlash();
+    }
+
+    /// <summary>
+    /// Reloads the active scene, resetting all gameplay state —
+    /// ObjectSpawner re-spawns objects and the timer restarts from scratch.
+    /// Hooked to the Continue button in both LevelUpWindow and TimeIsUpWindow.
+    /// </summary>
+    public void RestartGame()
+    {
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -71,7 +132,8 @@ public class UIManager : MonoBehaviour
     /// <summary>
     /// Ticks the timer down by one second each interval.
     /// Triggers the warning flash when the threshold is crossed,
-    /// and stops at zero.
+    /// and stops at zero — showing the Time Is Up window when the game is not
+    /// already won.
     /// </summary>
     private IEnumerator CountdownCoroutine()
     {
@@ -104,6 +166,13 @@ public class UIManager : MonoBehaviour
 
         // Final display pass to make sure "0:00" is shown.
         UpdateTimerDisplay();
+
+        // Only show Time Is Up if the player has not already cleared all objects.
+        if (!isGameOver)
+        {
+            SetWindowActive(timeIsUpWindow, true);
+            Debug.Log("[UIManager] Time is up — showing TimeIsUpWindow.");
+        }
     }
 
     /// <summary>
@@ -172,5 +241,13 @@ public class UIManager : MonoBehaviour
 
         if (timerText != null)
             timerText.color = ColorWhite;
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private static void SetWindowActive(GameObject window, bool active)
+    {
+        if (window != null)
+            window.SetActive(active);
     }
 }
