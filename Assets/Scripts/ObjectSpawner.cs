@@ -124,6 +124,11 @@ public class ObjectSpawner : MonoBehaviour
     [Tooltip("Reference to the UIManager. Auto-resolved via FindFirstObjectByType if left empty.")]
     [SerializeField] private UIManager _uiManager;
 
+    [Header("Manual Scene Objects Mode")]
+    [Tooltip("When true, the spawner skips prefab instantiation and instead finds all DraggableObject " +
+             "instances already placed in the scene, registers them, and calls OnSettled() on each.")]
+    [SerializeField] private bool _useManualSceneObjects = false;
+
     // ── Public properties ────────────────────────────────────────────────────
 
     /// <summary>Number of matched triples that will be (or were) spawned.</summary>
@@ -144,12 +149,16 @@ public class ObjectSpawner : MonoBehaviour
         foreach (DraggableObject obj in destroyed)
             _liveObjects.Remove(obj);
 
-        Debug.Log($"{LogPrefix} {destroyed.Length} object(s) removed — {_liveObjects.Count} remaining.");
+        Debug.Log($"{LogPrefix} Objects destroyed: {destroyed.Length}. Remaining live objects: {_liveObjects.Count}.");
 
-        if (_liveObjects.Count == 0)
+        if (_liveObjects.Count == 0 && _hasRegisteredObjects)
         {
-            Debug.Log($"{LogPrefix} All objects matched — notifying UIManager.");
+            Debug.Log($"{LogPrefix} All registered objects matched. Triggering win.");
             _uiManager?.OnAllObjectsMatched();
+        }
+        else if (_liveObjects.Count == 0 && !_hasRegisteredObjects)
+        {
+            Debug.Log($"{LogPrefix} Live object list is empty but no objects were registered. Win ignored.");
         }
     }
 
@@ -159,6 +168,13 @@ public class ObjectSpawner : MonoBehaviour
     private readonly List<DraggableObject> _liveObjects = new List<DraggableObject>();
     private int                            _pendingSettleCount;
 
+    /// <summary>
+    /// True once at least one live object has been registered, either through normal
+    /// spawning or manual scene-object registration. Guards against calling
+    /// <see cref="UIManager.OnAllObjectsMatched"/> before the game has actually started.
+    /// </summary>
+    private bool _hasRegisteredObjects;
+
     // ── Unity lifecycle ──────────────────────────────────────────────────────
 
     private void Start()
@@ -166,11 +182,46 @@ public class ObjectSpawner : MonoBehaviour
         if (_uiManager == null)
             _uiManager = FindFirstObjectByType<UIManager>();
 
+        if (_useManualSceneObjects)
+        {
+            RegisterManualSceneObjects();
+            return;
+        }
+
         if (!ValidateConfig()) return;
         SpawnTriples();
     }
 
     // ── Spawning ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Finds every <see cref="DraggableObject"/> already present in the scene,
+    /// registers each one in <see cref="_liveObjects"/>, and calls
+    /// <see cref="DraggableObject.OnSettled"/> so they are immediately clickable.
+    /// Used when <see cref="_useManualSceneObjects"/> is true.
+    /// </summary>
+    private void RegisterManualSceneObjects()
+    {
+        DraggableObject[] found = FindObjectsByType<DraggableObject>(FindObjectsSortMode.None);
+
+        foreach (DraggableObject obj in found)
+        {
+            _liveObjects.Add(obj);
+            obj.OnSettled();
+
+            ObjectType type = obj.ObjectType;
+            Debug.Log($"{LogPrefix} Registered manual object: {obj.name}, type={type}", obj);
+
+            if (type == default)
+                Debug.LogWarning($"{LogPrefix} '{obj.name}' has ObjectType=={default(ObjectType)} " +
+                                 "(enum default / index 0). Verify this is intentional in the Inspector.", obj);
+        }
+
+        if (_liveObjects.Count > 0)
+            _hasRegisteredObjects = true;
+
+        Debug.Log($"{LogPrefix} Manual scene objects mode — registered {_liveObjects.Count} DraggableObject(s).");
+    }
 
     private void SpawnTriples()
     {
@@ -188,6 +239,9 @@ public class ObjectSpawner : MonoBehaviour
         int total = deck.Count;
         for (int i = 0; i < total; i++)
             SpawnObject(deck[i], positions[i]);
+
+        if (total > 0)
+            _hasRegisteredObjects = true;
 
         Debug.Log($"{LogPrefix} Spawned {total} objects ({_initialObjectTripleCount} triples).");
     }

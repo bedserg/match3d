@@ -217,6 +217,9 @@ public class TrayController : MonoBehaviour
         if (_objectSpawner == null)
             _objectSpawner = FindFirstObjectByType<ObjectSpawner>();
 
+        if (_objectSpawner == null)
+            Debug.LogWarning(LogPrefix + " No ObjectSpawner found. Win tracking will not work.", this);
+
         if (_uiManager == null)
             _uiManager = FindFirstObjectByType<UIManager>();
 
