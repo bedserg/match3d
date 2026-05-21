@@ -96,18 +96,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _objectType: 0
-  _followSpeed: 20
   _maxIdleSpeed: 1.5
   _returnDuration: 0.25
-  _tapMoveThresholdPixels: 15
-  _tapMaxDuration: 0.25
   _autoMoveDuration: 0.25
-  _dropZone: {fileID: 0}
-  _useDragBounds: 1
-  _minX: -3.4
-  _maxX: 3.4
-  _minZ: -5.9
-  _maxZ: 5.9
+  _tray: {fileID: 0}
+  _trayScale: {x: 0.55, y: 0.55, z: 0.55}
+  _trayRotation: {x: 0, y: 0, z: 0}
 --- !u!1001 &5365711242252689077
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -116,6 +110,18 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 3825737893596638166}
     m_Modifications:
+    - target: {fileID: -8679921383154817045, guid: b76c48de62383bf48aa9f0e87bdc6f99, type: 3}
+      propertyPath: m_LocalScale.x
+      value: 84.6
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: b76c48de62383bf48aa9f0e87bdc6f99, type: 3}
+      propertyPath: m_LocalScale.y
+      value: 84.6
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: b76c48de62383bf48aa9f0e87bdc6f99, type: 3}
+      propertyPath: m_LocalScale.z
+      value: 84.6
+      objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: b76c48de62383bf48aa9f0e87bdc6f99, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0
@@ -155,6 +161,10 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: b76c48de62383bf48aa9f0e87bdc6f99, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: b76c48de62383bf48aa9f0e87bdc6f99, type: 3}
+      propertyPath: m_ConstrainProportionsScale
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 919132149155446097, guid: b76c48de62383bf48aa9f0e87bdc6f99, type: 3}
       propertyPath: m_Name

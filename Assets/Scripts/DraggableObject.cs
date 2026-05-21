@@ -138,6 +138,7 @@ public class DraggableObject : MonoBehaviour
     /// <param name="duration">Slide duration in seconds.</param>
     public void MoveToSlot(Vector3 targetPosition, float duration)
     {
+       
         StopAllCoroutines();
         StartCoroutine(MoveToSlotCoroutine(targetPosition, duration));
     }
@@ -340,6 +341,7 @@ public class DraggableObject : MonoBehaviour
 
     private IEnumerator AutoMoveCoroutine(TrayController tray)
     {
+        GetComponent<Collider>().enabled = false;
         // Capture board transform before any animation so we can restore it on rejection.
         Vector3    originalPosition = _rb.position;
         _boardScale                 = transform.localScale;
