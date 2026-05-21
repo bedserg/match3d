@@ -97,19 +97,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 926a02f279768c7488d90e73d2351528, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _objectType: 0
-  _followSpeed: 20
+  _objectType: 3
   _maxIdleSpeed: 1.5
   _returnDuration: 0.25
-  _tapMoveThresholdPixels: 15
-  _tapMaxDuration: 0.25
   _autoMoveDuration: 0.25
   _dropZone: {fileID: 0}
-  _useDragBounds: 1
-  _minX: -3.4
-  _maxX: 3.4
-  _minZ: -5.9
-  _maxZ: 5.9
 --- !u!1001 &1868159986572056184
 PrefabInstance:
   m_ObjectHideFlags: 0

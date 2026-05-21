@@ -135,15 +135,16 @@ public class ObjectSpawner : MonoBehaviour
     // ── Public API ───────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Called by <see cref="DropZone"/> after it destroys a matched pair so the
+    /// Called by <see cref="DropZone"/> after it destroys a matched triple so the
     /// spawner can keep its live-object list accurate.
     /// Notifies <see cref="UIManager"/> when every object has been matched.
     /// </summary>
-    public void OnObjectsDestroyed(DraggableObject left, DraggableObject right)
+    public void OnObjectsDestroyed(params DraggableObject[] destroyed)
     {
-        _liveObjects.Remove(left);
-        _liveObjects.Remove(right);
-        Debug.Log($"{LogPrefix} Pair removed — {_liveObjects.Count} object(s) remaining.");
+        foreach (DraggableObject obj in destroyed)
+            _liveObjects.Remove(obj);
+
+        Debug.Log($"{LogPrefix} {destroyed.Length} object(s) removed — {_liveObjects.Count} remaining.");
 
         if (_liveObjects.Count == 0)
         {

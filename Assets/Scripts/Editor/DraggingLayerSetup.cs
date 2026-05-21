@@ -4,8 +4,8 @@ using UnityEngine;
 
 /// <summary>
 /// Registers the "Dragging" physics layer automatically when the Editor loads.
-/// The layer is used to prevent non-dragged objects from being accepted by the
-/// DropZone trigger while a different object physically overlaps it.
+/// The layer was previously used to gate the tray trigger during drag operations;
+/// retained in case it is repurposed for future physics layer filtering.
 /// </summary>
 [InitializeOnLoad]
 internal static class DraggingLayerSetup

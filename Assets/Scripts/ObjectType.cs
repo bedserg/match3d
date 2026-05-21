@@ -4,10 +4,18 @@
 /// </summary>
 public enum ObjectType
 {
-    PuffyBun,
-    MaskBunny,
-    PensiveChick,
-    PinkBun,
-    KnightBunny,
-    GlassesBunny
+   PopcornBunny,
+   AppleChick,
+   BeeBunny,
+   BunBear,
+   ChocolateIcecream,
+   BrownPyjamasBunny,
+   PastelIcedCoffee,
+   PinkCloudPuff,
+   PastelStrawberry,
+   PastelHeartBunny,
+   PinkBalloonFlower,
+   BlushBunny,
+
+      
 }
