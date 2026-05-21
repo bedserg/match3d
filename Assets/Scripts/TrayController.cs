@@ -43,16 +43,26 @@ public class TrayController : MonoBehaviour
     [SerializeField] private float _compactDuration = 0.2f;
 
     [Header("Match-3 Merge Animation")]
-    [Tooltip("Duration in seconds for the left and right matching objects to slide into the middle object.")]
-    [SerializeField] private float _mergeDuration = 0.2f;
+    [Tooltip("Duration in seconds for the left and right objects to slide into the middle object's position.")]
+    [SerializeField] private float _mergeMoveDuration = 0.2f;
 
-    [Tooltip("Seconds to wait after the merge is complete before destroying the 3 objects. " +
-             "A small pause gives the player a moment to register the merge before objects vanish.")]
-    [SerializeField] private float _destroyDelayAfterMerge = 0.05f;
+    [Tooltip("Duration in seconds for the middle object to scale up to the pop peak scale.")]
+    [SerializeField] private float _popUpDuration = 0.12f;
 
-    [Tooltip("All 3 merging objects scale to their current tray scale multiplied by this value during the merge, " +
-             "creating a subtle squash effect. Set to 1 to disable. Recommended range: 0.6–0.9.")]
-    [SerializeField] private float _mergeScaleMultiplier = 0.8f;
+    [Tooltip("Duration in seconds for the middle object to shrink from peak scale down to finalShrinkScale.")]
+    [SerializeField] private float _shrinkDuration = 0.15f;
+
+    [Tooltip("Peak scale multiplier applied to the middle object's tray scale during the pop. " +
+             "For example 1.25 makes the object 25% larger at peak before shrinking away.")]
+    [SerializeField] private float _popScaleMultiplier = 1.25f;
+
+    [Tooltip("Final local scale the middle object shrinks to before it is destroyed. " +
+             "Use Vector3.zero to make it disappear completely.")]
+    [SerializeField] private Vector3 _finalShrinkScale = Vector3.zero;
+
+    [Tooltip("Seconds to wait after the shrink completes before the middle object is destroyed. " +
+             "A tiny pause lets the last frame of the shrink register visually.")]
+    [SerializeField] private float _destroyDelayAfterShrink = 0.03f;
 
     private readonly DraggableObject[] _slots = new DraggableObject[SlotCount];
 
@@ -471,8 +481,9 @@ public class TrayController : MonoBehaviour
     /// Runs the merge coroutine:
     /// <list type="number">
     ///   <item>Left and right objects slide into the middle object's position simultaneously.</item>
-    ///   <item>All 3 objects scale down by <see cref="_mergeScaleMultiplier"/> during the slide.</item>
-    ///   <item>After <see cref="_destroyDelayAfterMerge"/>, all 3 are destroyed.</item>
+    ///   <item>Left and right are hidden instantly once they arrive.</item>
+    ///   <item>Middle object pops up to <see cref="_popScaleMultiplier"/> × tray scale.</item>
+    ///   <item>Middle object shrinks down to <see cref="_finalShrinkScale"/> and is destroyed.</item>
     ///   <item>Remaining tray objects compact left.</item>
     ///   <item>Tap input is restored.</item>
     /// </list>
@@ -487,11 +498,13 @@ public class TrayController : MonoBehaviour
     }
 
     /// <summary>
-    /// Drives the match-3 merge → destroy → compact sequence.
-    /// The left and right objects animate to the middle object's slot position while
-    /// all three simultaneously scale down, giving a satisfying squash-into-center feel.
-    /// Input is already blocked by <see cref="InsertAndPlaceCoroutine"/>; this coroutine
-    /// keeps it blocked and releases it when done.
+    /// Drives the full match-3 animation sequence:
+    /// 1. Left and right objects slide to the middle position (parallel, no scale change during slide).
+    /// 2. Left and right are instantly hidden.
+    /// 3. Middle object pops up to peak scale then shrinks to <see cref="_finalShrinkScale"/>.
+    /// 4. Middle object is destroyed after <see cref="_destroyDelayAfterShrink"/>.
+    /// 5. Remaining objects compact left.
+    /// 6. Input is restored.
     /// </summary>
     private IEnumerator MergeSequenceCoroutine(DraggableObject[] matched, ObjectType objectType, Vector3 mergeCenterPos)
     {
@@ -499,28 +512,28 @@ public class TrayController : MonoBehaviour
         Debug.Log(LogPrefix + " Merge animation started for 3x '" + objectType + "'. "
                   + "Left and right sliding into middle at " + mergeCenterPos);
 
-        // Target scale: current tray scale * squash multiplier.
-        // matched[1] (middle) is the reference; all three objects share the same tray scale.
-        Vector3 mergeScale = matched[1].transform.localScale * _mergeScaleMultiplier;
+        // ── Phase 1: left and right slide to the middle position in parallel ──
+        Coroutine slideLeft  = StartCoroutine(matched[0].MergeToAndWait(mergeCenterPos, _mergeMoveDuration));
+        Coroutine slideRight = StartCoroutine(matched[2].MergeToAndWait(mergeCenterPos, _mergeMoveDuration));
 
-        // Run all three merge animations in parallel:
-        //   matched[0] = left  → slides to center + scales down
-        //   matched[1] = middle → stays in place  + scales down
-        //   matched[2] = right → slides to center + scales down
-        Coroutine mergeLeft   = StartCoroutine(matched[0].MergeToAndWait(mergeCenterPos, mergeScale, _mergeDuration));
-        Coroutine mergeMiddle = StartCoroutine(matched[1].MergeToAndWait(mergeCenterPos, mergeScale, _mergeDuration));
-        Coroutine mergeRight  = StartCoroutine(matched[2].MergeToAndWait(mergeCenterPos, mergeScale, _mergeDuration));
+        yield return slideLeft;
+        yield return slideRight;
 
-        yield return mergeLeft;
-        yield return mergeMiddle;
-        yield return mergeRight;
+        // ── Phase 2: instantly hide the left and right objects ─────────────────
+        matched[0].HideInstant();
+        matched[2].HideInstant();
 
-        Debug.Log(LogPrefix + " Merge complete. Waiting " + _destroyDelayAfterMerge + "s before destroy.");
+        Debug.Log(LogPrefix + " Left and right hidden. Starting middle pop.");
 
-        if (_destroyDelayAfterMerge > 0f)
-            yield return new WaitForSeconds(_destroyDelayAfterMerge);
+        // ── Phase 3: middle object pops up then shrinks ────────────────────────
+        Vector3 popPeakScale = matched[1].transform.localScale * _popScaleMultiplier;
+        yield return StartCoroutine(matched[1].PopAndShrink(popPeakScale, _finalShrinkScale,
+                                                            _popUpDuration, _shrinkDuration));
 
-        // Destroy all 3 and notify the spawner.
+        if (_destroyDelayAfterShrink > 0f)
+            yield return new WaitForSeconds(_destroyDelayAfterShrink);
+
+        // ── Phase 4: destroy all 3 and notify the spawner ─────────────────────
         Debug.Log(LogPrefix + " Destroying 3x '" + objectType + "'.");
         _objectSpawner?.OnObjectsDestroyed(matched[0], matched[1], matched[2]);
 
@@ -533,15 +546,14 @@ public class TrayController : MonoBehaviour
         // Wait one frame so Unity flushes Destroy() before compaction reads _slots.
         yield return null;
 
-        // Compact surviving objects to the left and wait for the slide to finish.
+        // ── Phase 5: compact surviving objects to the left ─────────────────────
         yield return StartCoroutine(CompactSlots());
 
-        // Restore tap input.
+        // ── Phase 6: restore input ─────────────────────────────────────────────
         _isMatchAnimating = false;
         SetGlobalInputBlocked(false);
         Debug.Log(LogPrefix + " Merge animation complete - input restored.");
 
-        // Check lose condition after the tray is fully settled.
         if (IsFull)
         {
             Debug.Log(LogPrefix + " Tray is full after match removal — lose condition.");

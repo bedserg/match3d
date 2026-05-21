@@ -158,23 +158,19 @@ public class DraggableObject : MonoBehaviour
     }
 
     /// <summary>
-    /// Simultaneously animates position and scale of an already-locked (kinematic) object
-    /// and yields until both animations are complete.
-    /// Used by <see cref="TrayController"/> during the match-3 merge sequence:
-    /// left and right objects slide to the middle slot position while all three scale down.
-    /// The object remains locked throughout; no physics state is changed.
+    /// Smoothly slides an already-locked (kinematic) object to <paramref name="targetPosition"/>
+    /// and yields until the animation is complete. Only position is animated; scale and rotation
+    /// remain at their current tray values throughout.
+    /// Used by <see cref="TrayController"/> for the left/right merge slide into the middle slot.
     /// </summary>
-    /// <param name="targetPosition">World-space destination (the middle slot position for left/right, unchanged for middle).</param>
-    /// <param name="targetScale">Local scale to animate toward (tray scale × merge multiplier).</param>
+    /// <param name="targetPosition">World-space destination (the middle slot anchor).</param>
     /// <param name="duration">Animation duration in seconds.</param>
-    public IEnumerator MergeToAndWait(Vector3 targetPosition, Vector3 targetScale, float duration)
+    public IEnumerator MergeToAndWait(Vector3 targetPosition, float duration)
     {
-        // Stop any active MoveToSlot coroutine running on this object before starting.
         StopAllCoroutines();
 
-        Vector3 startPos   = _rb.position;
-        Vector3 startScale = transform.localScale;
-        float   elapsed    = 0f;
+        Vector3 startPos = _rb.position;
+        float   elapsed  = 0f;
 
         while (elapsed < duration)
         {
@@ -183,15 +179,71 @@ public class DraggableObject : MonoBehaviour
             float smooth = t * t * (3f - 2f * t);
 
             _rb.MovePosition(Vector3.Lerp(startPos, targetPosition, smooth));
-            transform.localScale = Vector3.Lerp(startScale, targetScale, smooth);
-
             yield return null;
         }
 
         _rb.MovePosition(targetPosition);
-        transform.localScale = targetScale;
+        Debug.Log($"{LogPrefix} MergeToAndWait complete on '{name}' — pos={targetPosition}");
+    }
 
-        Debug.Log($"{LogPrefix} MergeToAndWait complete on '{name}' — pos={targetPosition}, scale={targetScale}");
+    /// <summary>
+    /// Instantly hides this object by setting its local scale to zero.
+    /// Used to hide the left and right merge objects the moment they reach the middle position,
+    /// before the middle object's pop animation begins.
+    /// </summary>
+    public void HideInstant()
+    {
+        transform.localScale = Vector3.zero;
+        Debug.Log($"{LogPrefix} HideInstant on '{name}'.");
+    }
+
+    /// <summary>
+    /// Scales the object up to <paramref name="popScale"/> then down to
+    /// <paramref name="shrinkScale"/>, yielding until both phases complete.
+    /// Used for the middle object's pop-and-disappear animation after the left/right
+    /// merge objects have been hidden.
+    /// Uses ease-out for the pop-up phase and ease-in for the shrink phase.
+    /// </summary>
+    /// <param name="popScale">Peak local scale reached at the top of the pop.</param>
+    /// <param name="shrinkScale">Final local scale the object shrinks to before destruction.</param>
+    /// <param name="popUpDuration">Duration in seconds for the scale-up phase.</param>
+    /// <param name="shrinkDuration">Duration in seconds for the scale-down phase.</param>
+    public IEnumerator PopAndShrink(Vector3 popScale, Vector3 shrinkScale,
+                                    float popUpDuration, float shrinkDuration)
+    {
+        StopAllCoroutines();
+
+        // ── Phase A: scale up to peak (ease-out: fast start, slow finish) ──────
+        Vector3 startScale = transform.localScale;
+        float   elapsed    = 0f;
+
+        while (elapsed < popUpDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t      = Mathf.Clamp01(elapsed / popUpDuration);
+            float eased  = 1f - (1f - t) * (1f - t); // ease-out quadratic
+
+            transform.localScale = Vector3.LerpUnclamped(startScale, popScale, eased);
+            yield return null;
+        }
+
+        transform.localScale = popScale;
+
+        // ── Phase B: scale down to shrinkScale (ease-in: slow start, fast finish) ──
+        elapsed = 0f;
+
+        while (elapsed < shrinkDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t     = Mathf.Clamp01(elapsed / shrinkDuration);
+            float eased = t * t; // ease-in quadratic
+
+            transform.localScale = Vector3.LerpUnclamped(popScale, shrinkScale, eased);
+            yield return null;
+        }
+
+        transform.localScale = shrinkScale;
+        Debug.Log($"{LogPrefix} PopAndShrink complete on '{name}'.");
     }
 
     /// <summary>
