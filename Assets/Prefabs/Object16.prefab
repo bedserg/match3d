@@ -10,8 +10,8 @@ GameObject:
   m_Component:
   - component: {fileID: 3396297189775211890}
   - component: {fileID: 7533302165889126337}
-  - component: {fileID: 2310150961131583889}
   - component: {fileID: 156304284220011752}
+  - component: {fileID: 1490041376837717648}
   m_Layer: 0
   m_Name: Object16
   m_TagString: Untagged
@@ -62,27 +62,6 @@ Rigidbody:
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
---- !u!135 &2310150961131583889
-SphereCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 917355771264185580}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Radius: 0.71663654
-  m_Center: {x: 0.081459284, y: 0.00077199936, z: 0.13440526}
 --- !u!114 &156304284220011752
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -99,7 +78,32 @@ MonoBehaviour:
   _maxIdleSpeed: 1.5
   _returnDuration: 0.25
   _autoMoveDuration: 0.25
-  _dropZone: {fileID: 0}
+  _tray: {fileID: 0}
+  _trayScale: {x: 0.55, y: 0.55, z: 0.55}
+  _trayRotation: {x: 0, y: 0, z: 0}
+--- !u!136 &1490041376837717648
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 917355771264185580}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 2
+  m_Radius: 0.8881469
+  m_Height: 1.7762938
+  m_Direction: 1
+  m_Center: {x: 0, y: 0, z: -0.12198675}
 --- !u!1001 &7840311633214279995
 PrefabInstance:
   m_ObjectHideFlags: 0

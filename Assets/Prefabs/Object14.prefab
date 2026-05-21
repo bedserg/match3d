@@ -81,10 +81,10 @@ CapsuleCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 2
-  m_Radius: 0.7395569
-  m_Height: 1.4791138
+  m_Radius: 0.8063688
+  m_Height: 1.6127377
   m_Direction: 1
-  m_Center: {x: 0.14054942, y: 0.08303809, z: 0.09900749}
+  m_Center: {x: -0.060610652, y: -0.03281212, z: -0.1694125}
 --- !u!114 &790093987942929907
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -101,7 +101,9 @@ MonoBehaviour:
   _maxIdleSpeed: 1.5
   _returnDuration: 0.25
   _autoMoveDuration: 0.25
-  _dropZone: {fileID: 0}
+  _tray: {fileID: 0}
+  _trayScale: {x: 0.55, y: 0.55, z: 0.55}
+  _trayRotation: {x: 0, y: 0, z: 0}
 --- !u!1001 &7397655345857685569
 PrefabInstance:
   m_ObjectHideFlags: 0

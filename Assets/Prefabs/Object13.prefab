@@ -10,8 +10,8 @@ GameObject:
   m_Component:
   - component: {fileID: 2406043734413489878}
   - component: {fileID: 9031029078492922671}
-  - component: {fileID: 1005994409830639227}
   - component: {fileID: 3152385035060148511}
+  - component: {fileID: 3060262232632555385}
   m_Layer: 0
   m_Name: Object13
   m_TagString: Untagged
@@ -62,27 +62,6 @@ Rigidbody:
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
---- !u!65 &1005994409830639227
-BoxCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5841000050338063416}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Size: {x: 0.9902227, y: 0.82111573, z: 1.2715964}
-  m_Center: {x: -0.004888594, y: -0.089442134, z: 0.13579825}
 --- !u!114 &3152385035060148511
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -99,7 +78,31 @@ MonoBehaviour:
   _maxIdleSpeed: 1.5
   _returnDuration: 0.25
   _autoMoveDuration: 0.25
-  _dropZone: {fileID: 0}
+  _tray: {fileID: 0}
+  _trayScale: {x: 0.55, y: 0.55, z: 0.55}
+  _trayRotation: {x: 0, y: 0, z: 0}
+--- !u!64 &3060262232632555385
+MeshCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5841000050338063416}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 5
+  m_Convex: 0
+  m_CookingOptions: 30
+  m_Mesh: {fileID: 0}
 --- !u!1001 &1746671640926246927
 PrefabInstance:
   m_ObjectHideFlags: 0
