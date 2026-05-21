@@ -4,12 +4,20 @@ using UnityEngine;
 
 /// <summary>
 /// Manages the 7-slot tray that sits at the bottom of the play field.
-/// Objects tapped in the scene fly into the first empty tray slot one by one.
+///
+/// Placement rule: when an object is tapped it flies to the tray.
+/// <list type="bullet">
+///   <item>If the tray already contains the same <see cref="ObjectType"/>, the new object
+///         is inserted directly after the last object of that type, and every object to the
+///         right is animated one slot to the right.</item>
+///   <item>If no matching type exists in the tray, the object is placed in the first empty slot.</item>
+/// </list>
 ///
 /// Match-3 removal: after every successful placement the tray scans all occupied
-/// slots for any ObjectType that appears 3 or more times. When a triple is found,
-/// those 3 objects are destroyed regardless of their slot positions, and the
-/// remaining objects compact left so the tray stays gapless.
+/// slots for any ObjectType that appears 3 or more times. Because same-type objects
+/// are always adjacent after insertion, the 3 matching objects are already grouped.
+/// They gather into tray slots 0-1-2, then disappear, and the remaining objects
+/// compact left so the tray stays gapless.
 ///
 /// Lose condition: if the tray is full and cannot accept another object, or if a
 /// placement fills the last slot without triggering a match-3 removal,
@@ -34,7 +42,14 @@ public class TrayController : MonoBehaviour
     [Tooltip("Duration in seconds for surviving objects to slide into compacted positions after a match-3 removal.")]
     [SerializeField] private float _compactDuration = 0.2f;
 
+    [Tooltip("Duration in seconds for matching objects to slide together into slots 0-1-2 before being destroyed.")]
+    [SerializeField] private float _gatherDuration = 0.35f;
+
     private readonly DraggableObject[] _slots = new DraggableObject[SlotCount];
+
+    // True while any tray animation (shift, match gather, compaction) is running.
+    // Suppresses new placements and scene-object taps during animation.
+    private bool _isMatchAnimating;
 
     // ── Events ───────────────────────────────────────────────────────────────
 
@@ -88,29 +103,41 @@ public class TrayController : MonoBehaviour
     // ── Public API ───────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Returns the world-space position of the first empty tray slot.
-    /// Used by <see cref="DraggableObject"/> to aim its fly-in animation before
-    /// placement is confirmed.
+    /// Returns the world-space position of the tray slot the object will be inserted into.
+    /// Uses the same smart-insert rule as <see cref="TryAutoPlaceObject"/> so the fly-in
+    /// animation aims at the correct destination.
     /// </summary>
     public Vector3 GetPreviewAutoSlotPosition(DraggableObject obj)
     {
-        int firstEmpty = FirstEmptySlotIndex();
-        return firstEmpty >= 0 ? SlotAnchorPosition(firstEmpty) : transform.position;
+        int insertIndex = FindInsertSlotIndex(obj.ObjectType);
+        return insertIndex >= 0 ? SlotAnchorPosition(insertIndex) : transform.position;
     }
 
     /// <summary>
-    /// Attempts to place <paramref name="obj"/> into the first empty tray slot.
+    /// Attempts to place <paramref name="obj"/> into the tray using the smart-insert rule:
+    /// <list type="number">
+    ///   <item>If the tray already contains the same <see cref="ObjectType"/>, insert
+    ///         directly after the last object of that type and shift everything right.</item>
+    ///   <item>Otherwise place in the first empty slot.</item>
+    /// </list>
     /// Rejects the object and fires <see cref="OnTrayFull"/> when the tray is full.
+    /// Also rejects silently while a shift or match-3 animation is running.
     /// After a successful placement, checks for a match-3 removal.
     /// If the tray is still full after the match check, fires <see cref="OnTrayFull"/>
     /// as the lose condition.
     /// </summary>
-    /// <returns>True when the object was accepted and locked into a tray slot.</returns>
+    /// <returns>True when the object was accepted and its insertion coroutine was started.</returns>
     public bool TryAutoPlaceObject(DraggableObject obj)
     {
         if (obj == null)
         {
             Debug.LogWarning(LogPrefix + " TryAutoPlaceObject called with a null object.");
+            return false;
+        }
+
+        if (_isMatchAnimating)
+        {
+            Debug.Log(LogPrefix + " Rejected '" + obj.name + "' - animation is in progress.");
             return false;
         }
 
@@ -133,24 +160,8 @@ public class TrayController : MonoBehaviour
             return false;
         }
 
-        int slotIndex = FirstEmptySlotIndex();
-        _slots[slotIndex] = obj;
-        obj.Lock(SlotAnchorPosition(slotIndex));
-
-        Debug.Log(LogPrefix + " '" + obj.name + "' placed into tray slot " + slotIndex
-                  + ". Occupied: " + OccupiedCount + "/" + SlotCount);
-
-        OnObjectEntered(obj, slotIndex);
-        CheckForTripleMatch();
-
-        // If the tray is still full after the match-3 check, no slots were freed —
-        // the tray cannot accept any more objects: lose condition.
-        if (IsFull)
-        {
-            Debug.Log(LogPrefix + " Tray is full after placement - no match-3 removal occurred. Lose condition.");
-            OnTrayFull?.Invoke();
-        }
-
+        int insertIndex = FindInsertSlotIndex(obj.ObjectType);
+        StartCoroutine(InsertAndPlaceCoroutine(obj, insertIndex));
         return true;
     }
 
@@ -193,16 +204,113 @@ public class TrayController : MonoBehaviour
         OnObjectExited(obj, slotIndex);
     }
 
+    // ── Insertion & shift logic ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Drives the full insert-shift-lock sequence for a newly tapped object:
+    /// <list type="number">
+    ///   <item>Blocks input.</item>
+    ///   <item>Shifts all objects at and to the right of <paramref name="insertIndex"/>
+    ///         one slot to the right, animating each to its new anchor.</item>
+    ///   <item>Locks the incoming object at <paramref name="insertIndex"/>.</item>
+    ///   <item>Runs the triple-match check.</item>
+    ///   <item>Restores input (or hands off to the match animation coroutine).</item>
+    /// </list>
+    /// </summary>
+    private IEnumerator InsertAndPlaceCoroutine(DraggableObject obj, int insertIndex)
+    {
+        _isMatchAnimating = true;
+        SetGlobalInputBlocked(true);
+
+        // Right-shift every object from insertIndex onward, working right-to-left
+        // to avoid overwriting neighbours before they are moved.
+        for (int i = SlotCount - 1; i > insertIndex; i--)
+        {
+            if (_slots[i - 1] != null)
+            {
+                _slots[i] = _slots[i - 1];
+                _slots[i].MoveToSlot(SlotAnchorPosition(i), _compactDuration);
+                Debug.Log(LogPrefix + " Shifted '" + _slots[i].name
+                          + "' from slot " + (i - 1) + " to slot " + i);
+            }
+        }
+
+        // Clear the insert slot so the new object can occupy it.
+        _slots[insertIndex] = null;
+
+        // Wait for all shift animations to finish before placing the new object.
+        yield return new WaitForSeconds(_compactDuration);
+
+        // Lock the new object into its insert slot.
+        _slots[insertIndex] = obj;
+        obj.Lock(SlotAnchorPosition(insertIndex));
+
+        Debug.Log(LogPrefix + " '" + obj.name + "' placed into tray slot " + insertIndex
+                  + ". Occupied: " + OccupiedCount + "/" + SlotCount);
+        OnObjectEntered(obj, insertIndex);
+
+        // Check for a triple match. If a match is found, CheckForTripleMatch starts
+        // MatchSequenceCoroutine which will unblock input when it finishes.
+        bool matchStarted = CheckForTripleMatch();
+
+        if (!matchStarted)
+        {
+            _isMatchAnimating = false;
+            SetGlobalInputBlocked(false);
+
+            // Tray is still full after placement with no match removal — lose condition.
+            if (IsFull)
+            {
+                Debug.Log(LogPrefix + " Tray is full after placement - no match-3 removal. Lose condition.");
+                OnTrayFull?.Invoke();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Determines the slot index at which a new object of <paramref name="type"/> should be inserted.
+    /// Returns the index immediately after the last existing object of the same type.
+    /// Falls back to <see cref="FirstEmptySlotIndex"/> when no matching type is present.
+    /// Returns -1 if there is no valid slot to insert into.
+    /// </summary>
+    private int FindInsertSlotIndex(ObjectType type)
+    {
+        int lastMatchIndex = -1;
+        for (int i = 0; i < SlotCount; i++)
+        {
+            if (_slots[i] != null && _slots[i].ObjectType == type)
+                lastMatchIndex = i;
+        }
+
+        if (lastMatchIndex >= 0)
+        {
+            // Insert directly after the last matching object.
+            // The slot at lastMatchIndex + 1 may currently be occupied — that is fine,
+            // InsertAndPlaceCoroutine will shift it and everything to the right.
+            int afterLast = lastMatchIndex + 1;
+            if (afterLast < SlotCount)
+                return afterLast;
+
+            // The last match is in the rightmost slot and the tray is full;
+            // the IsFull guard in TryAutoPlaceObject already handles this case.
+            return -1;
+        }
+
+        return FirstEmptySlotIndex();
+    }
+
     // ── Match-3 logic ────────────────────────────────────────────────────────
 
     /// <summary>
     /// Scans all occupied tray slots and checks whether any ObjectType appears
-    /// 3 or more times. Slot adjacency does not matter — matches are position-independent.
+    /// 3 or more times. Because same-type objects are always adjacent after smart
+    /// insertion, the 3 matched objects will already be grouped.
     /// When a triple is found, exactly 3 matching slots are cleared and
     /// <see cref="OnTripleMatched"/> is called with those objects.
     /// Only one triple is resolved per call.
     /// </summary>
-    private void CheckForTripleMatch()
+    /// <returns>True when a triple was found and a match animation was started.</returns>
+    private bool CheckForTripleMatch()
     {
         int typeCount = Enum.GetValues(typeof(ObjectType)).Length;
         int[] counts  = new int[typeCount];
@@ -217,7 +325,7 @@ public class TrayController : MonoBehaviour
 
             ObjectType matchedType = (ObjectType)t;
             Debug.Log(LogPrefix + " Match-3 found - type=" + matchedType
-                      + ". Removing 3 objects from tray.");
+                      + ". Starting gather animation.");
 
             int cleared = 0;
             DraggableObject[] matched = new DraggableObject[3];
@@ -233,8 +341,10 @@ public class TrayController : MonoBehaviour
             }
 
             OnTripleMatched(matched, matchedType);
-            return;
+            return true;
         }
+
+        return false;
     }
 
     // ── Tray compaction ──────────────────────────────────────────────────────
@@ -243,12 +353,9 @@ public class TrayController : MonoBehaviour
     /// Left-packs the tray after a match-3 removal: shifts every surviving object
     /// to the lowest available slot index and slides it to the new anchor position.
     /// Objects remain locked (kinematic) throughout the slide animation.
-    /// Runs one frame after destruction so Unity's Destroy() has been flushed first.
     /// </summary>
     private IEnumerator CompactSlots()
     {
-        yield return null;
-
         // Gather surviving tray objects in their current left-to-right order.
         DraggableObject[] compacted = new DraggableObject[SlotCount];
         int writeIndex = 0;
@@ -278,6 +385,22 @@ public class TrayController : MonoBehaviour
                 }
             }
         }
+
+        // Wait for the compaction slides to finish before releasing input.
+        yield return new WaitForSeconds(_compactDuration);
+    }
+
+    // ── Input blocking helpers ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Sets <see cref="DraggableObject.IsInputBlocked"/> on every active
+    /// <see cref="DraggableObject"/> in the scene to suppress taps during animation.
+    /// </summary>
+    private void SetGlobalInputBlocked(bool blocked)
+    {
+        DraggableObject[] all = FindObjectsByType<DraggableObject>(FindObjectsSortMode.None);
+        for (int i = 0; i < all.Length; i++)
+            all[i].IsInputBlocked = blocked;
     }
 
     // ── Slot helpers ─────────────────────────────────────────────────────────
@@ -329,20 +452,71 @@ public class TrayController : MonoBehaviour
 
     /// <summary>
     /// Called after 3 matching objects are found and their tray slots are cleared.
-    /// Default behaviour: destroys all three GameObjects, notifies the spawner, then
-    /// compacts the remaining tray contents.
-    /// Override to play a match-3 animation before the objects are destroyed.
+    /// Runs a coroutine that:
+    /// <list type="number">
+    ///   <item>Slides the 3 matching objects to tray slots 0, 1, and 2 simultaneously.</item>
+    ///   <item>Waits for all three movements to complete.</item>
+    ///   <item>Destroys the 3 objects and notifies the spawner.</item>
+    ///   <item>Compacts remaining tray objects to the left.</item>
+    ///   <item>Restores tap input.</item>
+    /// </list>
+    /// Override to customise the sequence (e.g. add particles or sound).
     /// </summary>
     /// <param name="matched">The 3 matched objects in tray-slot order (left to right).</param>
     /// <param name="objectType">The shared ObjectType of the removed triple.</param>
     protected virtual void OnTripleMatched(DraggableObject[] matched, ObjectType objectType)
     {
-        Debug.Log(LogPrefix + " Match-3 removal - destroying 3x '" + objectType + "'.");
+        StartCoroutine(MatchSequenceCoroutine(matched, objectType));
+    }
+
+    /// <summary>
+    /// Drives the full match-3 gather → destroy → compact sequence.
+    /// Input is already blocked by <see cref="InsertAndPlaceCoroutine"/>;
+    /// this coroutine keeps it blocked and releases it when done.
+    /// </summary>
+    private IEnumerator MatchSequenceCoroutine(DraggableObject[] matched, ObjectType objectType)
+    {
+        // Input is already blocked; ensure the flag is consistent.
+        _isMatchAnimating = true;
+        Debug.Log(LogPrefix + " Match animation started - input blocked.");
+
+        // Move the 3 matching objects to tray slots 0, 1, 2 simultaneously.
+        Debug.Log(LogPrefix + " Gathering 3x '" + objectType + "' to slots 0-1-2.");
+
+        Coroutine move0 = StartCoroutine(matched[0].MoveToSlotAndWait(SlotAnchorPosition(0), _gatherDuration));
+        Coroutine move1 = StartCoroutine(matched[1].MoveToSlotAndWait(SlotAnchorPosition(1), _gatherDuration));
+        Coroutine move2 = StartCoroutine(matched[2].MoveToSlotAndWait(SlotAnchorPosition(2), _gatherDuration));
+
+        yield return move0;
+        yield return move1;
+        yield return move2;
+
+        // All three objects have arrived — destroy them.
+        Debug.Log(LogPrefix + " Gather complete. Destroying 3x '" + objectType + "'.");
         _objectSpawner?.OnObjectsDestroyed(matched[0], matched[1], matched[2]);
 
         for (int i = 0; i < matched.Length; i++)
-            Destroy(matched[i].gameObject);
+        {
+            if (matched[i] != null)
+                Destroy(matched[i].gameObject);
+        }
 
-        StartCoroutine(CompactSlots());
+        // Wait one frame so Unity flushes Destroy() before compaction reads _slots.
+        yield return null;
+
+        // Compact surviving objects to the left and wait for the slide to finish.
+        yield return StartCoroutine(CompactSlots());
+
+        // Restore tap input.
+        _isMatchAnimating = false;
+        SetGlobalInputBlocked(false);
+        Debug.Log(LogPrefix + " Match animation complete - input restored.");
+
+        // Check lose condition after the animation resolves and the tray is fully settled.
+        if (IsFull)
+        {
+            Debug.Log(LogPrefix + " Tray is full after match removal — lose condition.");
+            OnTrayFull?.Invoke();
+        }
     }
 }

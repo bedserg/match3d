@@ -5,6 +5,11 @@ using UnityEngine;
 /// Attach to the root GameObject of an object prefab.
 /// Requires a Rigidbody and a Collider on the same GameObject.
 /// On click/tap the object automatically flies to the assigned drop zone.
+///
+/// While flying into the tray the object simultaneously animates its position,
+/// scale, and rotation to the configured tray values so it fits the smaller
+/// tray slots and faces front. On rejection it animates all three back to the
+/// values captured just before the fly-in started.
 /// </summary>
 [RequireComponent(typeof(Rigidbody))]
 [RequireComponent(typeof(Collider))]
@@ -32,6 +37,15 @@ public class DraggableObject : MonoBehaviour
     [Tooltip("The tray this object flies into on a tap. Auto-resolved at runtime if left empty.")]
     [SerializeField] private TrayController _tray;
 
+    [Header("Tray Visual Transform")]
+    [Tooltip("Target local scale applied while the object is seated in a tray slot. " +
+             "Use a uniform value such as (0.55, 0.55, 0.55) to shrink the object to fit the slot.")]
+    [SerializeField] private Vector3 _trayScale = new Vector3(0.55f, 0.55f, 0.55f);
+
+    [Tooltip("Target world-space Euler rotation applied while the object is seated in a tray slot. " +
+             "Default (0, 0, 0) shows the front face. The object animates to this rotation during the fly-in.")]
+    [SerializeField] private Vector3 _trayRotation = Vector3.zero;
+
     // ── Public API ───────────────────────────────────────────────────────────
 
     /// <summary>Which object type this instance represents.</summary>
@@ -50,6 +64,12 @@ public class DraggableObject : MonoBehaviour
     public bool IsSettled => _isSettled;
 
     /// <summary>
+    /// When true, <see cref="OnMouseUp"/> silently ignores all tap input.
+    /// Set by <see cref="TrayController"/> while a match-3 gather animation is running.
+    /// </summary>
+    public bool IsInputBlocked { get; set; }
+
+    /// <summary>
     /// Called by <see cref="ObjectSpawner"/> after the fall settle coroutine completes.
     /// Enables click interaction for this object.
     /// </summary>
@@ -58,15 +78,19 @@ public class DraggableObject : MonoBehaviour
     /// <summary>
     /// Locks the object at <paramref name="worldPosition"/>, making it kinematic so that
     /// other Rigidbody objects cannot push it out of its slot.
+    /// Also snaps scale and rotation to the configured tray values as a hard guarantee
+    /// in case the fly-in animation did not fully complete.
     /// </summary>
     /// <param name="worldPosition">Exact world-space position to snap the object to.</param>
     public void Lock(Vector3 worldPosition)
     {
-        _isLocked           = true;
-        _rb.isKinematic     = true;
-        _rb.linearVelocity  = Vector3.zero;
-        _rb.angularVelocity = Vector3.zero;
-        _rb.position        = worldPosition;
+        _isLocked               = true;
+        _rb.isKinematic         = true;
+        _rb.linearVelocity      = Vector3.zero;
+        _rb.angularVelocity     = Vector3.zero;
+        _rb.position            = worldPosition;
+        _rb.rotation            = Quaternion.Euler(_trayRotation);
+        transform.localScale    = _trayScale;
     }
 
     /// <summary>
@@ -91,7 +115,9 @@ public class DraggableObject : MonoBehaviour
     }
 
     /// <summary>
-    /// Smoothly moves the object to <paramref name="targetPosition"/>, then re-enables physics.
+    /// Smoothly moves the object to <paramref name="targetPosition"/> and animates its
+    /// scale and rotation back to the board values captured before the fly-in, then
+    /// re-enables physics.
     /// Used for programmatic repositioning when placement is rejected.
     /// </summary>
     /// <param name="targetPosition">World-space position to animate the object toward.</param>
@@ -104,6 +130,7 @@ public class DraggableObject : MonoBehaviour
 
     /// <summary>
     /// Smoothly slides an already-locked (kinematic) object to a new tray slot position.
+    /// Scale and rotation are already at tray values; only position is animated.
     /// The object remains locked throughout; no physics state is changed.
     /// Called by <see cref="TrayController"/> during tray compaction after a match-3 removal.
     /// </summary>
@@ -116,9 +143,26 @@ public class DraggableObject : MonoBehaviour
     }
 
     /// <summary>
+    /// Smoothly slides an already-locked (kinematic) object to a new tray slot position
+    /// and yields until the animation is complete.
+    /// Scale and rotation are already at tray values; only position is animated.
+    /// The object remains locked throughout; no physics state is changed.
+    /// Called by <see cref="TrayController"/> during the match-3 gather animation.
+    /// </summary>
+    /// <param name="targetPosition">World-space destination anchor of the target tray slot.</param>
+    /// <param name="duration">Slide duration in seconds.</param>
+    public IEnumerator MoveToSlotAndWait(Vector3 targetPosition, float duration)
+    {
+        StopAllCoroutines();
+        yield return MoveToSlotCoroutine(targetPosition, duration);
+    }
+
+    /// <summary>
     /// Smoothly flies the object into <paramref name="tray"/> and attempts to place it
-    /// in the first empty tray slot. If the tray is full or placement fails, the object
-    /// animates back to its original position via <see cref="ReturnToPosition"/>.
+    /// in the correct tray slot. During the fly-in, position, scale, and rotation all
+    /// animate simultaneously toward the configured tray values.
+    /// If the tray is full or placement fails, the object animates back to its original
+    /// board position, scale, and rotation.
     /// No-ops when the object is locked, not yet settled, or already flying.
     /// </summary>
     /// <param name="tray">The tray to attempt placement into.</param>
@@ -135,10 +179,15 @@ public class DraggableObject : MonoBehaviour
 
     // ── Private state ────────────────────────────────────────────────────────
 
-    private Rigidbody _rb;
-    private bool      _isLocked;
-    private bool      _isSettled;
-    private bool      _isAutoMoving;
+    private Rigidbody  _rb;
+    private bool       _isLocked;
+    private bool       _isSettled;
+    private bool       _isAutoMoving;
+
+    // Board-state snapshot captured at the start of each fly-in animation.
+    // Used to restore the object if placement is rejected.
+    private Vector3    _boardScale;
+    private Quaternion _boardRotation;
 
     // ── Unity lifecycle ──────────────────────────────────────────────────────
 
@@ -163,9 +212,10 @@ public class DraggableObject : MonoBehaviour
 
     private void OnMouseUp()
     {
-        if (_isLocked)     return;
-        if (!_isSettled)   return;
-        if (_isAutoMoving) return;
+        if (_isLocked)       return;
+        if (!_isSettled)     return;
+        if (_isAutoMoving)   return;
+        if (IsInputBlocked)  return;
 
         Debug.Log($"{LogPrefix} Click on '{name}' (type={_objectType}) — flying to tray.");
         StopMotion();
@@ -184,9 +234,9 @@ public class DraggableObject : MonoBehaviour
             float   sqr = vel.x * vel.x + vel.z * vel.z;
             if (sqr > _maxIdleSpeed * _maxIdleSpeed)
             {
-                float scale = _maxIdleSpeed / Mathf.Sqrt(sqr);
-                vel.x      *= scale;
-                vel.z      *= scale;
+                float spd = _maxIdleSpeed / Mathf.Sqrt(sqr);
+                vel.x     *= spd;
+                vel.z     *= spd;
                 _rb.linearVelocity = vel;
             }
         }
@@ -196,7 +246,10 @@ public class DraggableObject : MonoBehaviour
 
     private IEnumerator AutoMoveCoroutine(TrayController tray)
     {
-        Vector3 originalPosition = _rb.position;
+        // Capture board transform before any animation so we can restore it on rejection.
+        Vector3    originalPosition = _rb.position;
+        _boardScale                 = transform.localScale;
+        _boardRotation              = _rb.rotation;
 
         _isAutoMoving   = true;
         _rb.isKinematic = true;
@@ -204,20 +257,29 @@ public class DraggableObject : MonoBehaviour
 
         Debug.Log($"{LogPrefix} Flying '{name}' toward tray '{tray.name}'.");
 
-        Vector3 start       = _rb.position;
-        Vector3 destination = tray.GetPreviewAutoSlotPosition(this);
-        float   elapsed     = 0f;
+        Vector3    startPos   = _rb.position;
+        Vector3    destPos    = tray.GetPreviewAutoSlotPosition(this);
+        Vector3    startScale = transform.localScale;
+        Quaternion startRot   = _rb.rotation;
+        Quaternion targetRot  = Quaternion.Euler(_trayRotation);
+        float      elapsed    = 0f;
 
         while (elapsed < _autoMoveDuration)
         {
             elapsed += Time.deltaTime;
             float t      = Mathf.Clamp01(elapsed / _autoMoveDuration);
             float smooth = t * t * (3f - 2f * t);
-            _rb.MovePosition(Vector3.Lerp(start, destination, smooth));
+
+            _rb.MovePosition(Vector3.Lerp(startPos, destPos, smooth));
+            _rb.MoveRotation(Quaternion.Slerp(startRot, targetRot, smooth));
+            transform.localScale = Vector3.Lerp(startScale, _trayScale, smooth);
+
             yield return null;
         }
 
-        _rb.MovePosition(destination);
+        _rb.MovePosition(destPos);
+        _rb.MoveRotation(targetRot);
+        transform.localScale = _trayScale;
 
         bool placed = tray.TryAutoPlaceObject(this);
         Debug.Log($"{LogPrefix} TryAutoPlaceObject returned {placed} for '{name}'.");
@@ -227,12 +289,16 @@ public class DraggableObject : MonoBehaviour
             _rb.isKinematic = false;
             ReturnToPosition(originalPosition);
         }
-        // On success, TrayController.Lock() has already made the Rigidbody kinematic
-        // and snapped the object to the tray slot anchor; nothing more to do here.
+        // On success, TrayController.Lock() snaps position, rotation, and scale to tray
+        // values as a hard guarantee; nothing more to do here.
 
         _isAutoMoving = false;
     }
 
+    /// <summary>
+    /// Animates only position between tray slots. Scale and rotation are already at
+    /// tray values for any object that is currently locked in the tray.
+    /// </summary>
     private IEnumerator MoveToSlotCoroutine(Vector3 target, float duration)
     {
         Vector3 start   = _rb.position;
@@ -251,27 +317,39 @@ public class DraggableObject : MonoBehaviour
         Debug.Log($"{LogPrefix} MoveToSlot complete on '{name}' — now at {target}");
     }
 
-    private IEnumerator ReturnCoroutine(Vector3 target)
+    /// <summary>
+    /// Animates position, scale, and rotation back to the board values captured before
+    /// the fly-in, then restores dynamic physics so the object can be interacted with again.
+    /// </summary>
+    private IEnumerator ReturnCoroutine(Vector3 targetPosition)
     {
         _rb.isKinematic = true;
 
-        Vector3 start   = _rb.position;
-        float   elapsed = 0f;
+        Vector3    startPos   = _rb.position;
+        Vector3    startScale = transform.localScale;
+        Quaternion startRot   = _rb.rotation;
+        float      elapsed    = 0f;
 
         while (elapsed < _returnDuration)
         {
             elapsed += Time.deltaTime;
             float t      = Mathf.Clamp01(elapsed / _returnDuration);
             float smooth = t * t * (3f - 2f * t);
-            _rb.MovePosition(Vector3.Lerp(start, target, smooth));
+
+            _rb.MovePosition(Vector3.Lerp(startPos, targetPosition, smooth));
+            _rb.MoveRotation(Quaternion.Slerp(startRot, _boardRotation, smooth));
+            transform.localScale = Vector3.Lerp(startScale, _boardScale, smooth);
+
             yield return null;
         }
 
-        _rb.MovePosition(target);
-        _rb.isKinematic = false;
+        _rb.MovePosition(targetPosition);
+        _rb.MoveRotation(_boardRotation);
+        transform.localScale = _boardScale;
+        _rb.isKinematic      = false;
         StopMotion();
 
-        Debug.Log($"{LogPrefix} ReturnCoroutine complete on '{name}' — now at {target}");
+        Debug.Log($"{LogPrefix} ReturnCoroutine complete on '{name}' — now at {targetPosition}");
     }
 
     /// <summary>Zeroes out all velocity to prevent drifting on pick-up or release.</summary>

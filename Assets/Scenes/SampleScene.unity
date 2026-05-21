@@ -3363,6 +3363,7 @@ MonoBehaviour:
   - {fileID: 369724303}
   _objectSpawner: {fileID: 404249582}
   _compactDuration: 0.2
+  _gatherDuration: 0.35
 --- !u!1 &2146562209
 GameObject:
   m_ObjectHideFlags: 0
