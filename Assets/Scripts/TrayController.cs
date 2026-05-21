@@ -42,8 +42,17 @@ public class TrayController : MonoBehaviour
     [Tooltip("Duration in seconds for surviving objects to slide into compacted positions after a match-3 removal.")]
     [SerializeField] private float _compactDuration = 0.2f;
 
-    [Tooltip("Duration in seconds for matching objects to slide together into slots 0-1-2 before being destroyed.")]
-    [SerializeField] private float _gatherDuration = 0.35f;
+    [Header("Match-3 Merge Animation")]
+    [Tooltip("Duration in seconds for the left and right matching objects to slide into the middle object.")]
+    [SerializeField] private float _mergeDuration = 0.2f;
+
+    [Tooltip("Seconds to wait after the merge is complete before destroying the 3 objects. " +
+             "A small pause gives the player a moment to register the merge before objects vanish.")]
+    [SerializeField] private float _destroyDelayAfterMerge = 0.05f;
+
+    [Tooltip("All 3 merging objects scale to their current tray scale multiplied by this value during the merge, " +
+             "creating a subtle squash effect. Set to 1 to disable. Recommended range: 0.6–0.9.")]
+    [SerializeField] private float _mergeScaleMultiplier = 0.8f;
 
     private readonly DraggableObject[] _slots = new DraggableObject[SlotCount];
 
@@ -306,7 +315,8 @@ public class TrayController : MonoBehaviour
     /// 3 or more times. Because same-type objects are always adjacent after smart
     /// insertion, the 3 matched objects will already be grouped.
     /// When a triple is found, exactly 3 matching slots are cleared and
-    /// <see cref="OnTripleMatched"/> is called with those objects.
+    /// <see cref="OnTripleMatched"/> is called with those objects and the world-space
+    /// position of the middle slot (used as the merge destination).
     /// Only one triple is resolved per call.
     /// </summary>
     /// <returns>True when a triple was found and a match animation was started.</returns>
@@ -325,22 +335,28 @@ public class TrayController : MonoBehaviour
 
             ObjectType matchedType = (ObjectType)t;
             Debug.Log(LogPrefix + " Match-3 found - type=" + matchedType
-                      + ". Starting gather animation.");
+                      + ". Starting merge animation.");
 
             int cleared = 0;
-            DraggableObject[] matched = new DraggableObject[3];
+            DraggableObject[] matched      = new DraggableObject[3];
+            int[]             matchedSlots = new int[3];
 
             for (int i = 0; i < SlotCount && cleared < 3; i++)
             {
                 if (_slots[i] != null && _slots[i].ObjectType == matchedType)
                 {
-                    matched[cleared] = _slots[i];
-                    _slots[i]        = null;
+                    matched[cleared]      = _slots[i];
+                    matchedSlots[cleared] = i;
+                    _slots[i]             = null;
                     cleared++;
                 }
             }
 
-            OnTripleMatched(matched, matchedType);
+            // Capture the middle slot's world position before the slots are cleared so the
+            // merge coroutine has a stable destination even after the array is modified.
+            Vector3 mergeCenterPos = SlotAnchorPosition(matchedSlots[1]);
+
+            OnTripleMatched(matched, matchedType, mergeCenterPos);
             return true;
         }
 
@@ -452,47 +468,60 @@ public class TrayController : MonoBehaviour
 
     /// <summary>
     /// Called after 3 matching objects are found and their tray slots are cleared.
-    /// Runs a coroutine that:
+    /// Runs the merge coroutine:
     /// <list type="number">
-    ///   <item>Slides the 3 matching objects to tray slots 0, 1, and 2 simultaneously.</item>
-    ///   <item>Waits for all three movements to complete.</item>
-    ///   <item>Destroys the 3 objects and notifies the spawner.</item>
-    ///   <item>Compacts remaining tray objects to the left.</item>
-    ///   <item>Restores tap input.</item>
+    ///   <item>Left and right objects slide into the middle object's position simultaneously.</item>
+    ///   <item>All 3 objects scale down by <see cref="_mergeScaleMultiplier"/> during the slide.</item>
+    ///   <item>After <see cref="_destroyDelayAfterMerge"/>, all 3 are destroyed.</item>
+    ///   <item>Remaining tray objects compact left.</item>
+    ///   <item>Tap input is restored.</item>
     /// </list>
     /// Override to customise the sequence (e.g. add particles or sound).
     /// </summary>
-    /// <param name="matched">The 3 matched objects in tray-slot order (left to right).</param>
+    /// <param name="matched">The 3 matched objects in tray-slot order: [0]=left, [1]=middle, [2]=right.</param>
     /// <param name="objectType">The shared ObjectType of the removed triple.</param>
-    protected virtual void OnTripleMatched(DraggableObject[] matched, ObjectType objectType)
+    /// <param name="mergeCenterPos">World-space position of the middle slot, used as the merge destination.</param>
+    protected virtual void OnTripleMatched(DraggableObject[] matched, ObjectType objectType, Vector3 mergeCenterPos)
     {
-        StartCoroutine(MatchSequenceCoroutine(matched, objectType));
+        StartCoroutine(MergeSequenceCoroutine(matched, objectType, mergeCenterPos));
     }
 
     /// <summary>
-    /// Drives the full match-3 gather → destroy → compact sequence.
-    /// Input is already blocked by <see cref="InsertAndPlaceCoroutine"/>;
-    /// this coroutine keeps it blocked and releases it when done.
+    /// Drives the match-3 merge → destroy → compact sequence.
+    /// The left and right objects animate to the middle object's slot position while
+    /// all three simultaneously scale down, giving a satisfying squash-into-center feel.
+    /// Input is already blocked by <see cref="InsertAndPlaceCoroutine"/>; this coroutine
+    /// keeps it blocked and releases it when done.
     /// </summary>
-    private IEnumerator MatchSequenceCoroutine(DraggableObject[] matched, ObjectType objectType)
+    private IEnumerator MergeSequenceCoroutine(DraggableObject[] matched, ObjectType objectType, Vector3 mergeCenterPos)
     {
-        // Input is already blocked; ensure the flag is consistent.
         _isMatchAnimating = true;
-        Debug.Log(LogPrefix + " Match animation started - input blocked.");
+        Debug.Log(LogPrefix + " Merge animation started for 3x '" + objectType + "'. "
+                  + "Left and right sliding into middle at " + mergeCenterPos);
 
-        // Move the 3 matching objects to tray slots 0, 1, 2 simultaneously.
-        Debug.Log(LogPrefix + " Gathering 3x '" + objectType + "' to slots 0-1-2.");
+        // Target scale: current tray scale * squash multiplier.
+        // matched[1] (middle) is the reference; all three objects share the same tray scale.
+        Vector3 mergeScale = matched[1].transform.localScale * _mergeScaleMultiplier;
 
-        Coroutine move0 = StartCoroutine(matched[0].MoveToSlotAndWait(SlotAnchorPosition(0), _gatherDuration));
-        Coroutine move1 = StartCoroutine(matched[1].MoveToSlotAndWait(SlotAnchorPosition(1), _gatherDuration));
-        Coroutine move2 = StartCoroutine(matched[2].MoveToSlotAndWait(SlotAnchorPosition(2), _gatherDuration));
+        // Run all three merge animations in parallel:
+        //   matched[0] = left  → slides to center + scales down
+        //   matched[1] = middle → stays in place  + scales down
+        //   matched[2] = right → slides to center + scales down
+        Coroutine mergeLeft   = StartCoroutine(matched[0].MergeToAndWait(mergeCenterPos, mergeScale, _mergeDuration));
+        Coroutine mergeMiddle = StartCoroutine(matched[1].MergeToAndWait(mergeCenterPos, mergeScale, _mergeDuration));
+        Coroutine mergeRight  = StartCoroutine(matched[2].MergeToAndWait(mergeCenterPos, mergeScale, _mergeDuration));
 
-        yield return move0;
-        yield return move1;
-        yield return move2;
+        yield return mergeLeft;
+        yield return mergeMiddle;
+        yield return mergeRight;
 
-        // All three objects have arrived — destroy them.
-        Debug.Log(LogPrefix + " Gather complete. Destroying 3x '" + objectType + "'.");
+        Debug.Log(LogPrefix + " Merge complete. Waiting " + _destroyDelayAfterMerge + "s before destroy.");
+
+        if (_destroyDelayAfterMerge > 0f)
+            yield return new WaitForSeconds(_destroyDelayAfterMerge);
+
+        // Destroy all 3 and notify the spawner.
+        Debug.Log(LogPrefix + " Destroying 3x '" + objectType + "'.");
         _objectSpawner?.OnObjectsDestroyed(matched[0], matched[1], matched[2]);
 
         for (int i = 0; i < matched.Length; i++)
@@ -510,9 +539,9 @@ public class TrayController : MonoBehaviour
         // Restore tap input.
         _isMatchAnimating = false;
         SetGlobalInputBlocked(false);
-        Debug.Log(LogPrefix + " Match animation complete - input restored.");
+        Debug.Log(LogPrefix + " Merge animation complete - input restored.");
 
-        // Check lose condition after the animation resolves and the tray is fully settled.
+        // Check lose condition after the tray is fully settled.
         if (IsFull)
         {
             Debug.Log(LogPrefix + " Tray is full after match removal — lose condition.");

@@ -158,6 +158,43 @@ public class DraggableObject : MonoBehaviour
     }
 
     /// <summary>
+    /// Simultaneously animates position and scale of an already-locked (kinematic) object
+    /// and yields until both animations are complete.
+    /// Used by <see cref="TrayController"/> during the match-3 merge sequence:
+    /// left and right objects slide to the middle slot position while all three scale down.
+    /// The object remains locked throughout; no physics state is changed.
+    /// </summary>
+    /// <param name="targetPosition">World-space destination (the middle slot position for left/right, unchanged for middle).</param>
+    /// <param name="targetScale">Local scale to animate toward (tray scale × merge multiplier).</param>
+    /// <param name="duration">Animation duration in seconds.</param>
+    public IEnumerator MergeToAndWait(Vector3 targetPosition, Vector3 targetScale, float duration)
+    {
+        // Stop any active MoveToSlot coroutine running on this object before starting.
+        StopAllCoroutines();
+
+        Vector3 startPos   = _rb.position;
+        Vector3 startScale = transform.localScale;
+        float   elapsed    = 0f;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t      = Mathf.Clamp01(elapsed / duration);
+            float smooth = t * t * (3f - 2f * t);
+
+            _rb.MovePosition(Vector3.Lerp(startPos, targetPosition, smooth));
+            transform.localScale = Vector3.Lerp(startScale, targetScale, smooth);
+
+            yield return null;
+        }
+
+        _rb.MovePosition(targetPosition);
+        transform.localScale = targetScale;
+
+        Debug.Log($"{LogPrefix} MergeToAndWait complete on '{name}' — pos={targetPosition}, scale={targetScale}");
+    }
+
+    /// <summary>
     /// Smoothly flies the object into <paramref name="tray"/> and attempts to place it
     /// in the correct tray slot. During the fly-in, position, scale, and rotation all
     /// animate simultaneously toward the configured tray values.
