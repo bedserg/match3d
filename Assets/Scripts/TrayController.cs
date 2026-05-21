@@ -39,6 +39,9 @@ public class TrayController : MonoBehaviour
     [Tooltip("Reference to the ObjectSpawner so it can be notified when objects are removed by a match-3.")]
     [SerializeField] private ObjectSpawner _objectSpawner;
 
+    [Tooltip("Reference to the UIManager. Auto-resolved via FindFirstObjectByType if left empty.")]
+    [SerializeField] private UIManager _uiManager;
+
     [Tooltip("Duration in seconds for surviving objects to slide into compacted positions after a match-3 removal.")]
     [SerializeField] private float _compactDuration = 0.2f;
 
@@ -69,6 +72,9 @@ public class TrayController : MonoBehaviour
     // True while any tray animation (shift, match gather, compaction) is running.
     // Suppresses new placements and scene-object taps during animation.
     private bool _isMatchAnimating;
+
+    // True after the fail condition has been triggered. Permanently blocks new placements.
+    private bool _isFailed;
 
     // ── Events ───────────────────────────────────────────────────────────────
 
@@ -139,11 +145,10 @@ public class TrayController : MonoBehaviour
     ///         directly after the last object of that type and shift everything right.</item>
     ///   <item>Otherwise place in the first empty slot.</item>
     /// </list>
-    /// Rejects the object and fires <see cref="OnTrayFull"/> when the tray is full.
-    /// Also rejects silently while a shift or match-3 animation is running.
-    /// After a successful placement, checks for a match-3 removal.
-    /// If the tray is still full after the match check, fires <see cref="OnTrayFull"/>
-    /// as the lose condition.
+    /// Rejects the object silently when the tray is already full before placement.
+    /// Also rejects silently while a shift or match-3 animation is running, or after a fail.
+    /// After a successful placement, checks for a match-3 removal first.
+    /// Only if no match is found and the tray is still full does it fire <see cref="OnTrayFull"/>.
     /// </summary>
     /// <returns>True when the object was accepted and its insertion coroutine was started.</returns>
     public bool TryAutoPlaceObject(DraggableObject obj)
@@ -151,6 +156,12 @@ public class TrayController : MonoBehaviour
         if (obj == null)
         {
             Debug.LogWarning(LogPrefix + " TryAutoPlaceObject called with a null object.");
+            return false;
+        }
+
+        if (_isFailed)
+        {
+            Debug.Log(LogPrefix + " Rejected '" + obj.name + "' - game has already failed.");
             return false;
         }
 
@@ -168,8 +179,10 @@ public class TrayController : MonoBehaviour
 
         if (IsFull)
         {
-            Debug.Log(LogPrefix + " Tray is full - rejected '" + obj.name + "'.");
-            OnTrayFull?.Invoke();
+            // Tray is full before this object even lands — silently reject it back to the board.
+            // Do NOT fire OnTrayFull here; the fail is only triggered after a placed object
+            // fails to create a match-3 (handled inside InsertAndPlaceCoroutine).
+            Debug.Log(LogPrefix + " Tray is full - rejected '" + obj.name + "' silently.");
             return false;
         }
 
@@ -203,6 +216,38 @@ public class TrayController : MonoBehaviour
 
         if (_objectSpawner == null)
             _objectSpawner = FindFirstObjectByType<ObjectSpawner>();
+
+        if (_uiManager == null)
+            _uiManager = FindFirstObjectByType<UIManager>();
+
+        // Route the tray-full event directly to UIManager so it can show the FailWindow.
+        OnTrayFull += HandleTrayFull;
+    }
+
+    // ── Fail handling ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Permanently blocks the tray from accepting any further objects.
+    /// Called externally (e.g. by <see cref="UIManager"/> on time-up) so that
+    /// every game-over path converges on the same fail flag.
+    /// </summary>
+    public void SetFailed()
+    {
+        if (_isFailed) return;
+        _isFailed = true;
+        Debug.Log(LogPrefix + " SetFailed called — tray is now permanently blocked.");
+    }
+
+    /// <summary>
+    /// Invoked when <see cref="OnTrayFull"/> fires. Sets the permanent fail flag,
+    /// blocks all object input, and delegates UI to <see cref="UIManager"/>.
+    /// </summary>
+    private void HandleTrayFull()
+    {
+        _isFailed = true;
+        SetGlobalInputBlocked(true);
+        _uiManager?.OnTrayFull();
+        Debug.Log(LogPrefix + " Tray full — fail state set, input blocked.");
     }
 
     private void OnTriggerExit(Collider other)
@@ -232,8 +277,10 @@ public class TrayController : MonoBehaviour
     ///   <item>Shifts all objects at and to the right of <paramref name="insertIndex"/>
     ///         one slot to the right, animating each to its new anchor.</item>
     ///   <item>Locks the incoming object at <paramref name="insertIndex"/>.</item>
-    ///   <item>Runs the triple-match check.</item>
-    ///   <item>Restores input (or hands off to the match animation coroutine).</item>
+    ///   <item>Checks for a match-3 first. If found, starts the merge animation which
+    ///         unblocks input when complete.</item>
+    ///   <item>Only if no match-3 was found AND the tray is now full fires
+    ///         <see cref="OnTrayFull"/> as the lose condition.</item>
     /// </list>
     /// </summary>
     private IEnumerator InsertAndPlaceCoroutine(DraggableObject obj, int insertIndex)
@@ -268,19 +315,21 @@ public class TrayController : MonoBehaviour
                   + ". Occupied: " + OccupiedCount + "/" + SlotCount);
         OnObjectEntered(obj, insertIndex);
 
-        // Check for a triple match. If a match is found, CheckForTripleMatch starts
-        // MatchSequenceCoroutine which will unblock input when it finishes.
+        // ── Step 1: check for match-3 first ───────────────────────────────────
+        // If a match is found, MergeSequenceCoroutine takes ownership of input
+        // unblocking. Do NOT check for tray-full here — the 7th object just
+        // created a match, so the player should not fail.
         bool matchStarted = CheckForTripleMatch();
 
         if (!matchStarted)
         {
+            // ── Step 2: no match — unblock input, then check tray-full ────────
             _isMatchAnimating = false;
             SetGlobalInputBlocked(false);
 
-            // Tray is still full after placement with no match removal — lose condition.
             if (IsFull)
             {
-                Debug.Log(LogPrefix + " Tray is full after placement - no match-3 removal. Lose condition.");
+                Debug.Log(LogPrefix + " Tray is full after placement with no match-3 — fail condition.");
                 OnTrayFull?.Invoke();
             }
         }
@@ -553,11 +602,5 @@ public class TrayController : MonoBehaviour
         _isMatchAnimating = false;
         SetGlobalInputBlocked(false);
         Debug.Log(LogPrefix + " Merge animation complete - input restored.");
-
-        if (IsFull)
-        {
-            Debug.Log(LogPrefix + " Tray is full after match removal — lose condition.");
-            OnTrayFull?.Invoke();
-        }
     }
 }

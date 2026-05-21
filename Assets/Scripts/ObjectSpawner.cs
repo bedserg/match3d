@@ -4,10 +4,10 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Spawns a configurable number of matched object pairs above the play area.
+/// Spawns a configurable number of matched object triples above the play area.
 ///
-/// Pair rule  : <see cref="_initialObjectPairCount"/> = N → 2N total objects.
-///              Each pair is built from the same randomly chosen prefab entry in
+/// Triple rule: <see cref="_initialObjectTripleCount"/> = N → 3N total objects.
+///              Each triple is built from the same randomly chosen prefab entry in
 ///              <see cref="_objectPrefabs"/>. ObjectType is read directly from the
 ///              prefab's <see cref="DraggableObject"/> component (or the optional
 ///              override on each <see cref="ObjectPrefabEntry"/>).
@@ -19,7 +19,7 @@ using UnityEngine;
 /// Physics    : Objects fall under gravity and tumble until velocity settles, then
 ///              Y position and XZ rotation are frozen for top-down dragging.
 /// Extensible : Add a new entry to <see cref="_objectPrefabs"/> in the Inspector and
-///              it will automatically be included in random pair generation.
+///              it will automatically be included in random triple generation.
 /// </summary>
 public class ObjectSpawner : MonoBehaviour
 {
@@ -67,8 +67,8 @@ public class ObjectSpawner : MonoBehaviour
     [SerializeField] private ObjectPrefabEntry[] _objectPrefabs;
 
     [Header("Spawning")]
-    [Tooltip("Number of matched pairs to spawn. Total objects = InitialObjectPairCount × 2.")]
-    [SerializeField, Min(1)] private int _initialObjectPairCount = 5;
+    [Tooltip("Number of matched triples to spawn. Total objects = InitialObjectTripleCount × 3.")]
+    [SerializeField, Min(1)] private int _initialObjectTripleCount = 5;
 
     [Tooltip("XZ extents of the spawn area, centred on this GameObject's position. " +
              "Should fit inside the play area walls with inset padding.")]
@@ -126,8 +126,8 @@ public class ObjectSpawner : MonoBehaviour
 
     // ── Public properties ────────────────────────────────────────────────────
 
-    /// <summary>Number of matched pairs that will be (or were) spawned.</summary>
-    public int InitialObjectPairCount => _initialObjectPairCount;
+    /// <summary>Number of matched triples that will be (or were) spawned.</summary>
+    public int InitialObjectTripleCount => _initialObjectTripleCount;
 
     /// <summary>All object instances currently alive in the scene.</summary>
     public IReadOnlyList<DraggableObject> LiveObjects => _liveObjects;
@@ -167,12 +167,12 @@ public class ObjectSpawner : MonoBehaviour
             _uiManager = FindFirstObjectByType<UIManager>();
 
         if (!ValidateConfig()) return;
-        SpawnPairs();
+        SpawnTriples();
     }
 
     // ── Spawning ─────────────────────────────────────────────────────────────
 
-    private void SpawnPairs()
+    private void SpawnTriples()
     {
         List<int>     deck      = BuildDeck();
         List<Vector3> positions = BuildSpawnPositions(deck.Count);
@@ -189,20 +189,21 @@ public class ObjectSpawner : MonoBehaviour
         for (int i = 0; i < total; i++)
             SpawnObject(deck[i], positions[i]);
 
-        Debug.Log($"{LogPrefix} Spawned {total} objects ({_initialObjectPairCount} pairs).");
+        Debug.Log($"{LogPrefix} Spawned {total} objects ({_initialObjectTripleCount} triples).");
     }
 
     /// <summary>
-    /// Builds a deck of 2 × <see cref="_initialObjectPairCount"/> prefab entry indices.
-    /// Each pair's entry is chosen independently at random from <see cref="_objectPrefabs"/>.
+    /// Builds a deck of 3 × <see cref="_initialObjectTripleCount"/> prefab entry indices.
+    /// Each triple's entry is chosen independently at random from <see cref="_objectPrefabs"/>.
     /// </summary>
     private List<int> BuildDeck()
     {
-        var deck = new List<int>(_initialObjectPairCount * 2);
+        var deck = new List<int>(_initialObjectTripleCount * 3);
 
-        for (int pair = 0; pair < _initialObjectPairCount; pair++)
+        for (int triple = 0; triple < _initialObjectTripleCount; triple++)
         {
             int index = UnityEngine.Random.Range(0, _objectPrefabs.Length);
+            deck.Add(index);
             deck.Add(index);
             deck.Add(index);
         }
@@ -575,7 +576,7 @@ public class ObjectSpawner : MonoBehaviour
         // Grid lines (shown when grid placement is active)
         if (_useGridPlacement)
         {
-            int totalObjects = _initialObjectPairCount * 2;
+            int totalObjects = _initialObjectTripleCount * 3;
             int cols = Mathf.Max(1, Mathf.CeilToInt(Mathf.Sqrt(totalObjects)));
             int rows = Mathf.Max(1, Mathf.CeilToInt((float)totalObjects / cols));
             float cellW = _spawnAreaSize.x / cols;

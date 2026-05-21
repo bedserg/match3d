@@ -16,6 +16,6 @@ public enum ObjectType
    PastelHeartBunny,
    PinkBalloonFlower,
    BlushBunny,
-
+   BlossomDonut
       
 }

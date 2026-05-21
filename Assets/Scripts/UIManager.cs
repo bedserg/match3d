@@ -25,6 +25,9 @@ public class UIManager : MonoBehaviour
     [Tooltip("Panel shown when time runs out and objects are still remaining.")]
     [SerializeField] private GameObject timeIsUpWindow;
 
+    [Tooltip("Panel shown when the 7-slot tray fills up without a match-3 removal.")]
+    [SerializeField] private GameObject failWindow;
+
     [Header("Timer Settings")]
     [Tooltip("Starting minutes for the countdown.")]
     public int startMinutes = 3;
@@ -50,6 +53,15 @@ public class UIManager : MonoBehaviour
     /// Set to true when the player wins before time is up, to skip the time-is-up panel.
     private bool isGameOver;
 
+    // ── Public state ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// True once any end-game condition has been triggered (time-up, win, or tray-full fail).
+    /// Queried by <see cref="DraggableObject"/> to block all further tap and fly-in input
+    /// even if <see cref="DraggableObject.IsInputBlocked"/> was not yet set on that instance.
+    /// </summary>
+    public bool IsGameOver => isGameOver;
+
     /// Cached reference to the flash coroutine so it can be stopped cleanly.
     private Coroutine flashCoroutine;
 
@@ -72,8 +84,9 @@ public class UIManager : MonoBehaviour
             timerText.color = ColorWhite;
 
         // Hide end-game windows at start.
-        SetWindowActive(levelUpWindow, false);
+        SetWindowActive(levelUpWindow,  false);
         SetWindowActive(timeIsUpWindow, false);
+        SetWindowActive(failWindow,     false);
 
         isRunning  = true;
         isGameOver = false;
@@ -103,6 +116,60 @@ public class UIManager : MonoBehaviour
         SetWindowActive(levelUpWindow, true);
 
         Debug.Log("[UIManager] All objects matched — showing LevelUpWindow.");
+    }
+
+    /// <summary>
+    /// Called when the countdown reaches zero. Stops gameplay, blocks all
+    /// object input and tray placement, and shows the Time Is Up window.
+    /// </summary>
+    public void OnTimeIsUp()
+    {
+        if (isGameOver) return;
+
+        isGameOver = true;
+        isRunning  = false;
+
+        StopFlash();
+        UpdateTimerDisplay();
+
+        // Block clicks on every DraggableObject still on the board.
+        DraggableObject[] all = FindObjectsByType<DraggableObject>(FindObjectsSortMode.None);
+        foreach (DraggableObject obj in all)
+            obj.IsInputBlocked = true;
+
+        // Block the tray from accepting new objects.
+        TrayController tray = FindFirstObjectByType<TrayController>();
+        if (tray != null)
+            tray.SetFailed();
+
+        SetWindowActive(timeIsUpWindow, true);
+
+        Debug.Log("[UIManager] Time is up — showing TimeIsUpWindow.");
+    }
+
+    /// <summary>
+    /// Called by <see cref="TrayController"/> when the tray fills up without a
+    /// match-3 removal. Stops the timer, blocks all object input, and shows
+    /// the Fail window.
+    /// </summary>
+    public void OnTrayFull()
+    {
+        if (isGameOver) return;
+
+        isGameOver = true;
+        isRunning  = false;
+
+        StopFlash();
+        UpdateTimerDisplay();
+
+        // Block clicks on every DraggableObject still on the board.
+        DraggableObject[] all = FindObjectsByType<DraggableObject>(FindObjectsSortMode.None);
+        foreach (DraggableObject obj in all)
+            obj.IsInputBlocked = true;
+
+        SetWindowActive(failWindow, true);
+
+        Debug.Log("[UIManager] Tray is full — showing FailWindow.");
     }
 
     /// <summary>
@@ -167,12 +234,9 @@ public class UIManager : MonoBehaviour
         // Final display pass to make sure "0:00" is shown.
         UpdateTimerDisplay();
 
-        // Only show Time Is Up if the player has not already cleared all objects.
+        // Only trigger the time-up sequence if the game is not already over.
         if (!isGameOver)
-        {
-            SetWindowActive(timeIsUpWindow, true);
-            Debug.Log("[UIManager] Time is up — showing TimeIsUpWindow.");
-        }
+            OnTimeIsUp();
     }
 
     /// <summary>

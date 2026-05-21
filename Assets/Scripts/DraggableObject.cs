@@ -261,6 +261,8 @@ public class DraggableObject : MonoBehaviour
         if (_isLocked)         return;
         if (!_isSettled)       return;
         if (_isAutoMoving)     return;
+        if (IsInputBlocked)    return;
+        if (_uiManager != null && _uiManager.IsGameOver) return;
 
         StopAllCoroutines();
         StartCoroutine(AutoMoveCoroutine(tray));
@@ -268,10 +270,11 @@ public class DraggableObject : MonoBehaviour
 
     // ── Private state ────────────────────────────────────────────────────────
 
-    private Rigidbody  _rb;
-    private bool       _isLocked;
-    private bool       _isSettled;
-    private bool       _isAutoMoving;
+    private Rigidbody    _rb;
+    private UIManager    _uiManager;
+    private bool         _isLocked;
+    private bool         _isSettled;
+    private bool         _isAutoMoving;
 
     // Board-state snapshot captured at the start of each fly-in animation.
     // Used to restore the object if placement is rejected.
@@ -282,7 +285,8 @@ public class DraggableObject : MonoBehaviour
 
     private void Awake()
     {
-        _rb = GetComponent<Rigidbody>();
+        _rb        = GetComponent<Rigidbody>();
+        _uiManager = FindFirstObjectByType<UIManager>();
 
         if (_tray == null)
             _tray = FindFirstObjectByType<TrayController>();
@@ -305,6 +309,7 @@ public class DraggableObject : MonoBehaviour
         if (!_isSettled)     return;
         if (_isAutoMoving)   return;
         if (IsInputBlocked)  return;
+        if (_uiManager != null && _uiManager.IsGameOver) return;
 
         Debug.Log($"{LogPrefix} Click on '{name}' (type={_objectType}) — flying to tray.");
         StopMotion();
@@ -344,6 +349,14 @@ public class DraggableObject : MonoBehaviour
         _rb.isKinematic = true;
         StopMotion();
 
+        // Guard: game may have ended in the same frame the click was registered.
+        if (_uiManager != null && _uiManager.IsGameOver)
+        {
+            _isAutoMoving   = false;
+            _rb.isKinematic = false;
+            yield break;
+        }
+
         Debug.Log($"{LogPrefix} Flying '{name}' toward tray '{tray.name}'.");
 
         Vector3    startPos   = _rb.position;
@@ -369,6 +382,17 @@ public class DraggableObject : MonoBehaviour
         _rb.MovePosition(destPos);
         _rb.MoveRotation(targetRot);
         transform.localScale = _trayScale;
+
+        // Guard: game may have ended while this object was mid-flight.
+        // Return the object to its board position instead of placing it in the tray.
+        if (_uiManager != null && _uiManager.IsGameOver)
+        {
+            Debug.Log($"{LogPrefix} Game over detected after flight — returning '{name}' to board.");
+            _isAutoMoving   = false;
+            _rb.isKinematic = false;
+            ReturnToPosition(originalPosition);
+            yield break;
+        }
 
         bool placed = tray.TryAutoPlaceObject(this);
         Debug.Log($"{LogPrefix} TryAutoPlaceObject returned {placed} for '{name}'.");
