@@ -168,6 +168,10 @@ PrefabInstance:
       propertyPath: m_ConstrainProportionsScale
       value: 1
       objectReference: {fileID: 0}
+    - target: {fileID: -7511558181221131132, guid: eb5fe3a3e82f68e42b56b98a5f7e163d, type: 3}
+      propertyPath: m_CastShadows
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 919132149155446097, guid: eb5fe3a3e82f68e42b56b98a5f7e163d, type: 3}
       propertyPath: m_Name
       value: Meshy_AI_Pink_Blossom_Donut_0521073042_texture

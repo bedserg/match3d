@@ -76,12 +76,13 @@ public class UIManager : MonoBehaviour
 
     private void Start()
     {
+        Application.targetFrameRate = 60;
         // Convert the configured start time into a single float for easy math.
         remainingTime = startMinutes * 60f + startSeconds;
 
         // Ensure the text starts white.
-        if (timerText != null)
-            timerText.color = ColorWhite;
+       // if (timerText != null)
+           // timerText.color = ColorWhite;
 
         // Hide end-game windows at start.
         SetWindowActive(levelUpWindow,  false);
@@ -280,15 +281,15 @@ public class UIManager : MonoBehaviour
                 elapsed += Time.deltaTime;
                 float t = Mathf.Clamp01(elapsed / flashCycleDuration);
 
-                if (timerText != null)
-                    timerText.color = Color.Lerp(ColorRed, ColorWhite, t);
+              //  if (timerText != null)
+                 //   timerText.color = Color.Lerp(ColorRed, ColorWhite, t);
 
                 yield return null;
             }
 
             // Ensure we land exactly on white before the next cycle snaps to red.
-            if (timerText != null)
-                timerText.color = ColorRed; // snap to red for the next cycle start
+          //  if (timerText != null)
+              //  timerText.color = ColorRed; // snap to red for the next cycle start
         }
     }
 
@@ -303,8 +304,8 @@ public class UIManager : MonoBehaviour
             flashCoroutine = null;
         }
 
-        if (timerText != null)
-            timerText.color = ColorWhite;
+       // if (timerText != null)
+          //  timerText.color = ColorWhite;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

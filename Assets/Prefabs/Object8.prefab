@@ -166,6 +166,10 @@ PrefabInstance:
       propertyPath: m_ConstrainProportionsScale
       value: 1
       objectReference: {fileID: 0}
+    - target: {fileID: -7511558181221131132, guid: 2799e60948c02b84fb9976225d89873a, type: 3}
+      propertyPath: m_CastShadows
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 919132149155446097, guid: 2799e60948c02b84fb9976225d89873a, type: 3}
       propertyPath: m_Name
       value: Meshy_AI_Pastel_Strawberry_0520111452_texture
