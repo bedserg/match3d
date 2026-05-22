@@ -22,11 +22,18 @@ public class UIManager : MonoBehaviour
     [Tooltip("Panel shown when the player matches all objects before time runs out.")]
     [SerializeField] private GameObject levelUpWindow;
 
+    [Tooltip("Text label inside the Level Up window that displays the completed level, e.g. 'Level 1'.")]
+    [SerializeField] private Text levelText;
+
     [Tooltip("Panel shown when time runs out and objects are still remaining.")]
     [SerializeField] private GameObject timeIsUpWindow;
 
     [Tooltip("Panel shown when the 7-slot tray fills up without a match-3 removal.")]
     [SerializeField] private GameObject failWindow;
+
+    [Header("Level Progression")]
+    [Tooltip("Reference to the LevelObjectiveManager. Auto-resolved in Start if left empty.")]
+    [SerializeField] private LevelObjectiveManager _levelObjectiveManager;
 
     [Header("Timer Settings")]
     [Tooltip("Starting minutes for the countdown.")]
@@ -77,12 +84,10 @@ public class UIManager : MonoBehaviour
     private void Start()
     {
         Application.targetFrameRate = 60;
-        // Convert the configured start time into a single float for easy math.
         remainingTime = startMinutes * 60f + startSeconds;
 
-        // Ensure the text starts white.
-       // if (timerText != null)
-           // timerText.color = ColorWhite;
+        if (_levelObjectiveManager == null)
+            _levelObjectiveManager = FindFirstObjectByType<LevelObjectiveManager>();
 
         // Hide end-game windows at start.
         SetWindowActive(levelUpWindow,  false);
@@ -101,8 +106,10 @@ public class UIManager : MonoBehaviour
     // ────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Called by <see cref="ObjectSpawner"/> when every object has been matched
-    /// and destroyed. Stops the timer and shows the Level Up window.
+    /// Called by <see cref="LevelObjectiveManager"/> when the objective is completed.
+    /// Displays the completed level number, advances the saved level via
+    /// <see cref="LevelObjectiveManager.AdvanceToNextLevel"/>, stops the timer,
+    /// and shows the Level Up window.
     /// </summary>
     public void OnAllObjectsMatched()
     {
@@ -113,6 +120,11 @@ public class UIManager : MonoBehaviour
 
         StopFlash();
         UpdateTimerDisplay();
+
+        if (levelText != null && _levelObjectiveManager != null)
+            levelText.text = "Level " + _levelObjectiveManager.CurrentLevel;
+
+        _levelObjectiveManager?.AdvanceToNextLevel();
 
         SetWindowActive(levelUpWindow, true);
 

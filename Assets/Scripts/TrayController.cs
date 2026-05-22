@@ -42,6 +42,9 @@ public class TrayController : MonoBehaviour
     [Tooltip("Reference to the UIManager. Auto-resolved via FindFirstObjectByType if left empty.")]
     [SerializeField] private UIManager _uiManager;
 
+    [Tooltip("Reference to the LevelObjectiveManager. Auto-resolved via FindFirstObjectByType if left empty.")]
+    [SerializeField] private LevelObjectiveManager _levelObjectiveManager;
+
     [Tooltip("Duration in seconds for surviving objects to slide into compacted positions after a match-3 removal.")]
     [SerializeField] private float _compactDuration = 0.2f;
 
@@ -223,6 +226,9 @@ public class TrayController : MonoBehaviour
         if (_uiManager == null)
             _uiManager = FindFirstObjectByType<UIManager>();
 
+        if (_levelObjectiveManager == null)
+            _levelObjectiveManager = FindFirstObjectByType<LevelObjectiveManager>();
+
         // Route the tray-full event directly to UIManager so it can show the FailWindow.
         OnTrayFull += HandleTrayFull;
     }
@@ -313,6 +319,9 @@ public class TrayController : MonoBehaviour
         // Lock the new object into its insert slot.
         _slots[insertIndex] = obj;
         obj.Lock(SlotAnchorPosition(insertIndex));
+
+        // Notify objective manager now that the object is confirmed in a slot.
+        _levelObjectiveManager?.RegisterPlacedObject(obj.ObjectType);
 
         Debug.Log(LogPrefix + " '" + obj.name + "' placed into tray slot " + insertIndex
                   + ". Occupied: " + OccupiedCount + "/" + SlotCount);

@@ -124,6 +124,11 @@ public class ObjectSpawner : MonoBehaviour
     [Tooltip("Reference to the UIManager. Auto-resolved via FindFirstObjectByType if left empty.")]
     [SerializeField] private UIManager _uiManager;
 
+    [Header("Win Condition")]
+    [Tooltip("When true, ObjectSpawner triggers the win screen once all live objects are destroyed. " +
+             "Set to false when LevelObjectiveManager owns the win condition instead.")]
+    [SerializeField] private bool _useAllObjectsMatchedWinCondition = false;
+
     [Header("Manual Scene Objects Mode")]
     [Tooltip("When true, the spawner skips prefab instantiation and instead finds all DraggableObject " +
              "instances already placed in the scene, registers them, and calls OnSettled() on each.")]
@@ -140,9 +145,10 @@ public class ObjectSpawner : MonoBehaviour
     // ── Public API ───────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Called by <see cref="DropZone"/> after it destroys a matched triple so the
+    /// Called by <see cref="TrayController"/> after it destroys a matched triple so the
     /// spawner can keep its live-object list accurate.
-    /// Notifies <see cref="UIManager"/> when every object has been matched.
+    /// Notifies <see cref="UIManager"/> when every object has been matched,
+    /// but only when <see cref="_useAllObjectsMatchedWinCondition"/> is enabled.
     /// </summary>
     public void OnObjectsDestroyed(params DraggableObject[] destroyed)
     {
@@ -150,6 +156,12 @@ public class ObjectSpawner : MonoBehaviour
             _liveObjects.Remove(obj);
 
         Debug.Log($"{LogPrefix} Objects destroyed: {destroyed.Length}. Remaining live objects: {_liveObjects.Count}.");
+
+        if (!_useAllObjectsMatchedWinCondition)
+        {
+            Debug.Log($"{LogPrefix} Win condition owned by LevelObjectiveManager — skipping win check.");
+            return;
+        }
 
         if (_liveObjects.Count == 0 && _hasRegisteredObjects)
         {
