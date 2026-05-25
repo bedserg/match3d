@@ -69,6 +69,45 @@ public class LevelObjectiveManager : MonoBehaviour
     public int CurrentLevel => _currentLevel;
 
     /// <summary>
+    /// The <see cref="ObjectType"/> the player must collect for the current level,
+    /// or <c>null</c> when no requirement has been loaded yet.
+    /// </summary>
+    public ObjectType? CurrentObjectiveType =>
+        _activeRequirement != null ? _activeRequirement.targetObjectType : (ObjectType?)null;
+
+    /// <summary>
+    /// Returns the <see cref="ObjectType"/> that still needs progress toward the current
+    /// level objective. Use this to drive boosters that need to know which type to collect.
+    /// </summary>
+    /// <param name="neededType">
+    /// The target <see cref="ObjectType"/> when the method returns <c>true</c>;
+    /// undefined when the method returns <c>false</c>.
+    /// </param>
+    /// <returns>
+    /// <c>true</c> when an objective is loaded and not yet complete;
+    /// <c>false</c> when there is no active objective or progress is already complete.
+    /// </returns>
+    public bool TryGetCurrentNeededObjectType(out ObjectType neededType)
+    {
+        neededType = default;
+
+        if (_activeRequirement == null)
+        {
+            Debug.Log("[LevelObjectiveManager] TryGetCurrentNeededObjectType — no active requirement.");
+            return false;
+        }
+
+        if (_isComplete)
+        {
+            Debug.Log("[LevelObjectiveManager] TryGetCurrentNeededObjectType — objective already complete.");
+            return false;
+        }
+
+        neededType = _activeRequirement.targetObjectType;
+        return true;
+    }
+
+    /// <summary>
     /// Increments the saved level number and persists it so the next scene load
     /// starts the correct objective. Called by <see cref="UIManager"/> after a win.
     /// </summary>

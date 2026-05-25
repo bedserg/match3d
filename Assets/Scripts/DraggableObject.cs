@@ -63,11 +63,51 @@ public class DraggableObject : MonoBehaviour
     /// <summary>True once the object has finished falling and is ready to be clicked.</summary>
     public bool IsSettled => _isSettled;
 
+    /// <summary>True while the object is currently executing an auto-move animation toward the tray.</summary>
+    public bool IsAutoMoving => _isAutoMoving;
+
+    /// <summary>
+    /// Duration in seconds used for all auto-move animations on this object.
+    /// Exposed so callers such as <see cref="TrayController"/> can pass the same
+    /// value to <see cref="BoosterMoveToExactSlotAndWait"/> without hardcoding it.
+    /// </summary>
+    public float AutoMoveDuration => _autoMoveDuration;
+
     /// <summary>
     /// When true, <see cref="OnMouseUp"/> silently ignores all tap input.
     /// Set by <see cref="TrayController"/> while a match-3 gather animation is running.
     /// </summary>
     public bool IsInputBlocked { get; set; }
+
+    /// <summary>
+    /// Returns true when this object is a valid target for a booster that moves it into the tray.
+    /// Combines every precondition that must hold before a booster can safely dispatch this object:
+    /// active in hierarchy, not locked in the tray, fully settled, not already auto-moving,
+    /// not input-blocked by an ongoing animation, and the game is not in a game-over state.
+    /// </summary>
+    public bool CanBeCollectedByBooster()
+    {
+        return gameObject.activeInHierarchy
+               && !_isLocked
+               && _isSettled
+               && !_isAutoMoving
+               && !IsInputBlocked
+               && (_uiManager == null || !_uiManager.IsGameOver);
+    }
+
+    /// <summary>
+    /// Returns true when this object is locked inside a tray slot and can be selected by
+    /// a booster that repositions tray objects (e.g. the slot-6 merge booster).
+    /// Checks only conditions relevant to locked tray objects: active in hierarchy and
+    /// game is not in a game-over state. Auto-move and settled flags do not apply here
+    /// because locked objects are kinematic and cannot be mid-flight.
+    /// </summary>
+    public bool CanBeSelectedFromTrayByBooster()
+    {
+        return gameObject.activeInHierarchy
+               && _isLocked
+               && (_uiManager == null || !_uiManager.IsGameOver);
+    }
 
     /// <summary>
     /// Called by <see cref="ObjectSpawner"/> after the fall settle coroutine completes.
@@ -126,6 +166,80 @@ public class DraggableObject : MonoBehaviour
         Debug.Log($"{LogPrefix} ReturnToPosition on '{name}' — target={targetPosition}");
         StopAllCoroutines();
         StartCoroutine(ReturnCoroutine(targetPosition));
+    }
+
+    /// <summary>
+    /// Smoothly flies the object from its current tray position back to the gameplay area,
+    /// restoring the board scale and rotation captured before the last fly-in, then
+    /// re-enables physics so the object can be interacted with again.
+    /// Called by <see cref="TrayController"/> when the remove-last-object booster is used.
+    /// </summary>
+    /// <param name="targetPosition">World-space position of the booster return point.</param>
+    public void FlyToBoosterReturnPoint(Vector3 targetPosition)
+    {
+        Debug.Log($"{LogPrefix} FlyToBoosterReturnPoint on '{name}' — target={targetPosition}");
+        StopAllCoroutines();
+        StartCoroutine(ReturnCoroutine(targetPosition));
+    }
+
+    /// <summary>
+    /// Moves the object from its current tray slot back to the gameplay area over
+    /// <paramref name="duration"/> seconds, fully restoring it as an interactive board object:
+    /// <list type="number">
+    ///   <item>Stops all running coroutines and clears the locked flag.</item>
+    ///   <item>Keeps the Rigidbody kinematic during the animated move.</item>
+    ///   <item>Smoothly lerps position, scale, and rotation to the pre-tray board values.</item>
+    ///   <item>On arrival: makes the Rigidbody non-kinematic, re-enables the collider,
+    ///         zeroes velocity, and marks the object as settled so it can be clicked again.</item>
+    /// </list>
+    /// </summary>
+    /// <param name="targetPosition">World-space destination in the gameplay area.</param>
+    /// <param name="duration">Duration of the move animation in seconds.</param>
+    public void MoveBackToBoardFromTray(Vector3 targetPosition, float duration)
+    {
+        Debug.Log($"{LogPrefix} MoveBackToBoardFromTray on '{name}' — target={targetPosition}, duration={duration}");
+        StopAllCoroutines();
+        _isLocked  = false;
+        _isSettled = false;
+        StartCoroutine(MoveBackToBoardFromTrayCoroutine(targetPosition, duration));
+    }
+
+    /// <summary>
+    /// Drives the board-return animation started by <see cref="MoveBackToBoardFromTray"/>.
+    /// </summary>
+    private IEnumerator MoveBackToBoardFromTrayCoroutine(Vector3 targetPosition, float duration)
+    {
+        _rb.isKinematic = true;
+
+        Vector3    startPos   = _rb.position;
+        Vector3    startScale = transform.localScale;
+        Quaternion startRot   = _rb.rotation;
+        float      elapsed    = 0f;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t      = Mathf.Clamp01(elapsed / duration);
+            float smooth = t * t * (3f - 2f * t);
+
+            _rb.MovePosition(Vector3.Lerp(startPos, targetPosition, smooth));
+            _rb.MoveRotation(Quaternion.Slerp(startRot, _boardRotation, smooth));
+            transform.localScale = Vector3.Lerp(startScale, _boardScale, smooth);
+
+            yield return null;
+        }
+
+        _rb.MovePosition(targetPosition);
+        _rb.MoveRotation(_boardRotation);
+        transform.localScale = _boardScale;
+
+        _rb.isKinematic = false;
+        StopMotion();
+
+        GetComponent<Collider>().enabled = true;
+        _isSettled = true;
+
+        Debug.Log($"{LogPrefix} MoveBackToBoardFromTray complete on '{name}' — now at {targetPosition}");
     }
 
     /// <summary>
@@ -269,6 +383,74 @@ public class DraggableObject : MonoBehaviour
         StartCoroutine(AutoMoveCoroutine(tray));
     }
 
+    /// <summary>
+    /// Booster-2 exclusive coroutine. Moves this object smoothly to
+    /// <paramref name="targetPosition"/> over <paramref name="duration"/> seconds,
+    /// animating rotation to tray rotation and scale to tray scale.
+    ///
+    /// Designed specifically for the slot-6 merge sequence:
+    /// <list type="bullet">
+    ///   <item>Stops any running coroutines and disables the collider immediately.</item>
+    ///   <item>Sets <c>_isAutoMoving = true</c> and <c>Rigidbody.isKinematic = true</c>.</item>
+    ///   <item>Lerps position, rotation, and scale each frame using a smooth-step curve.</item>
+    ///   <item>On arrival: clears <c>_isAutoMoving</c>, keeps the Rigidbody kinematic,
+    ///         and leaves the collider <b>disabled</b> — the merge animation runs next and
+    ///         the object is destroyed immediately after, so re-enabling is never needed.</item>
+    /// </list>
+    ///
+    /// Does <b>not</b> call <see cref="TrayController.TryAutoPlaceObject"/>,
+    /// does <b>not</b> snapshot or restore board scale/rotation,
+    /// and does <b>not</b> call <see cref="Lock"/> — kinematic state is preserved
+    /// without flagging the object as tray-locked so the merge coroutine retains control.
+    /// </summary>
+    /// <param name="targetPosition">Exact world-space destination (e.g. <c>BoosterSlot6Position()</c>).</param>
+    /// <param name="duration">Movement duration in seconds.</param>
+    public IEnumerator BoosterMoveToExactSlotAndWait(Vector3 targetPosition, float duration)
+    {
+        StopAllCoroutines();
+
+        GetComponent<Collider>().enabled = false;
+
+        _isAutoMoving   = true;
+        _rb.isKinematic = true;
+        StopMotion();
+
+        Vector3    startPos   = _rb.position;
+        Vector3    startScale = transform.localScale;
+        Quaternion startRot   = _rb.rotation;
+        Quaternion targetRot  = Quaternion.Euler(_trayRotation);
+
+        float elapsed = 0f;
+        float safeDuration = Mathf.Max(duration, 0.001f);
+
+        Debug.Log($"{LogPrefix} Booster moving '{name}' to slot-6 position {targetPosition} over {safeDuration:F2}s.");
+
+        while (elapsed < safeDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t      = Mathf.Clamp01(elapsed / safeDuration);
+            float smooth = t * t * (3f - 2f * t);
+
+            _rb.MovePosition(Vector3.Lerp(startPos, targetPosition, smooth));
+            _rb.MoveRotation(Quaternion.Slerp(startRot, targetRot, smooth));
+            transform.localScale = Vector3.Lerp(startScale, _trayScale, smooth);
+
+            yield return null;
+        }
+
+        // Hard-snap to destination without calling Lock() — the booster merge
+        // animation takes over immediately and the object will be destroyed after.
+        _rb.MovePosition(targetPosition);
+        _rb.MoveRotation(targetRot);
+        transform.localScale = _trayScale;
+
+        _isAutoMoving = false;
+        // _rb.isKinematic stays true — merge animation expects kinematic objects.
+        // Collider stays disabled — object is destroyed after the merge sequence.
+
+        Debug.Log($"{LogPrefix} Booster slot-6 move complete — '{name}' at {targetPosition}.");
+    }
+
     // ── Private state ────────────────────────────────────────────────────────
 
     private Rigidbody    _rb;
@@ -278,7 +460,9 @@ public class DraggableObject : MonoBehaviour
     private bool         _isAutoMoving;
 
     // Board-state snapshot captured at the start of each fly-in animation.
-    // Used to restore the object if placement is rejected.
+    // Used to restore the object if placement is rejected or the booster returns it.
+    // Seeded in Awake from the object's initial transform so the booster always has
+    // a valid fallback even when AutoMoveCoroutine has never run for this object.
     private Vector3    _boardScale;
     private Quaternion _boardRotation;
 
@@ -295,6 +479,11 @@ public class DraggableObject : MonoBehaviour
         if (_tray == null)
             Debug.LogWarning($"{LogPrefix} No TrayController found in the scene. " +
                              $"Tap-to-place will not work on '{name}'.", this);
+
+        // Seed board-state fields from the object's initial transform so the booster
+        // always has valid values to restore to, even if AutoMoveCoroutine never ran.
+        _boardScale    = transform.localScale;
+        _boardRotation = _rb.rotation;
 
         // Objects placed directly in the scene (not via ObjectSpawner) are considered
         // already settled so they can be clicked immediately.
@@ -339,7 +528,30 @@ public class DraggableObject : MonoBehaviour
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Fire-and-forget wrapper used by <see cref="AutoMoveToDropZone"/> (player tap path).
+    /// Delegates entirely to <see cref="AutoMoveCoroutineAndWait"/>; the caller does not
+    /// need to wait for completion.
+    /// </summary>
     private IEnumerator AutoMoveCoroutine(TrayController tray)
+    {
+        yield return StartCoroutine(AutoMoveCoroutineAndWait(tray));
+    }
+
+    /// <summary>
+    /// Full fly-in animation shared by both the tap path (<see cref="AutoMoveCoroutine"/>).
+    ///
+    /// Yields until one of three outcomes is fully resolved:
+    /// <list type="number">
+    ///   <item><b>Game over mid-flight</b> — clears auto-move state and yields break.</item>
+    ///   <item><b>Placement accepted</b> — <see cref="TrayController.Lock"/> snaps the object;
+    ///         the coroutine exits immediately.</item>
+    ///   <item><b>Placement rejected</b> — yields through the full
+    ///         <see cref="ReturnCoroutine"/> so the caller does not proceed until the
+    ///         object has physically returned to its board position.</item>
+    /// </list>
+    /// </summary>
+    private IEnumerator AutoMoveCoroutineAndWait(TrayController tray)
     {
         GetComponent<Collider>().enabled = false;
         // Capture board transform before any animation so we can restore it on rejection.
@@ -392,7 +604,7 @@ public class DraggableObject : MonoBehaviour
             Debug.Log($"{LogPrefix} Game over detected after flight — returning '{name}' to board.");
             _isAutoMoving   = false;
             _rb.isKinematic = false;
-            ReturnToPosition(originalPosition);
+            yield return StartCoroutine(ReturnCoroutine(originalPosition));
             yield break;
         }
 
@@ -402,7 +614,10 @@ public class DraggableObject : MonoBehaviour
         if (!placed)
         {
             _rb.isKinematic = false;
-            ReturnToPosition(originalPosition);
+            // Yield through the full return animation so callers that need to sequence
+            // multiple dispatches (e.g. the booster) wait until this object is back on
+            // the board before proceeding.
+            yield return StartCoroutine(ReturnCoroutine(originalPosition));
         }
         // On success, TrayController.Lock() snaps position, rotation, and scale to tray
         // values as a hard guarantee; nothing more to do here.

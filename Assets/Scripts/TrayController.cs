@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -70,6 +71,17 @@ public class TrayController : MonoBehaviour
              "A tiny pause lets the last frame of the shrink register visually.")]
     [SerializeField] private float _destroyDelayAfterShrink = 0.03f;
 
+    [Header("Booster – Remove Last Object")]
+    [Tooltip("Empty GameObject placed in the middle of the gameplay area. " +
+             "The removed tray object flies back to this position. Must be assigned.")]
+    [SerializeField] private Transform _boosterReturnPoint;
+
+    [Tooltip("Seconds to wait for the removed object's return animation before compacting. " +
+             "Should match the DraggableObject._returnDuration on your prefabs (default 0.25 s).")]
+    [SerializeField] private float _boosterReturnDuration = 0.25f;
+
+    [Header("Booster – Collect Objective Triple")]
+
     private readonly DraggableObject[] _slots = new DraggableObject[SlotCount];
 
     // True while any tray animation (shift, match gather, compaction) is running.
@@ -78,6 +90,12 @@ public class TrayController : MonoBehaviour
 
     // True after the fail condition has been triggered. Permanently blocks new placements.
     private bool _isFailed;
+
+    // Held true for the entire duration of the collect-triple booster sequence.
+    // Prevents InsertAndPlaceCoroutine and MergeSequenceCoroutine from calling
+    // SetGlobalInputBlocked(false) between per-object dispatches, which would otherwise
+    // release player-tap input in the gaps between objects 1→2 and 2→3.
+    private bool _boosterInputLock;
 
     // ── Events ───────────────────────────────────────────────────────────────
 
@@ -93,6 +111,13 @@ public class TrayController : MonoBehaviour
     public event Action OnTrayFull;
 
     // ── Public state ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// True while any tray animation is running — shift, merge, or compaction.
+    /// External systems (e.g. boosters) can poll this to know when the tray is
+    /// ready to accept the next object.
+    /// </summary>
+    public bool IsBusy => _isMatchAnimating;
 
     /// <summary>True when every tray slot is empty.</summary>
     public bool IsEmpty
@@ -200,6 +225,365 @@ public class TrayController : MonoBehaviour
         return true;
     }
 
+    /// <summary>
+    /// UI entry point for the remove-last-object booster. Connect this to a Unity Button OnClick event.
+    /// Delegates all logic to <see cref="TryUseRemoveLastTrayObjectBooster"/>.
+    /// </summary>
+    public void UseRemoveLastTrayObjectBoosterButton()
+    {
+        TryUseRemoveLastTrayObjectBooster();
+    }
+
+    /// <summary>
+    /// Booster: removes the object from the rightmost occupied tray slot and
+    /// animates it back to the gameplay area. Remaining tray objects compact left.
+    ///
+    /// No-ops when:
+    /// <list type="bullet">
+    ///   <item>The tray is empty.</item>
+    ///   <item>The game has already failed (<see cref="_isFailed"/>).</item>
+    ///   <item>A tray or merge animation is already running (<see cref="_isMatchAnimating"/>).</item>
+    /// </list>
+    /// Blocks all draggable-object input for the duration of the animation and
+    /// restores it once compaction completes.
+    /// </summary>
+    private void TryUseRemoveLastTrayObjectBooster()
+    {
+        if (IsEmpty)
+        {
+            Debug.Log(LogPrefix + " Booster ignored — tray is empty.");
+            return;
+        }
+
+        if (_isFailed)
+        {
+            Debug.Log(LogPrefix + " Booster ignored — game has already failed.");
+            return;
+        }
+
+        if (_isMatchAnimating)
+        {
+            Debug.Log(LogPrefix + " Booster ignored — animation is in progress.");
+            return;
+        }
+
+        // Find the rightmost occupied slot.
+        int lastIndex = LastOccupiedSlotIndex();
+
+        if (lastIndex < 0)
+        {
+            Debug.Log(LogPrefix + " Booster ignored — no occupied slot found.");
+            return;
+        }
+
+        if (_boosterReturnPoint == null)
+        {
+            Debug.LogWarning(LogPrefix + " Booster cancelled — _boosterReturnPoint is not assigned.", this);
+            return;
+        }
+
+        StartCoroutine(RemoveLastTrayObjectBoosterCoroutine(lastIndex));
+    }
+
+    /// <summary>
+    /// Drives the booster animation sequence. Intentionally does not check for match-3,
+    /// register objectives, or destroy any objects — it only removes one object and
+    /// returns it to the board.
+    /// <list type="number">
+    ///   <item>Sets <see cref="_isMatchAnimating"/> and blocks global input.</item>
+    ///   <item>Clears <paramref name="slotIndex"/> from the slot array.</item>
+    ///   <item>Flies the object back to <see cref="_boosterReturnPoint"/> via
+    ///         <see cref="DraggableObject.MoveBackToBoardFromTray"/>.</item>
+    ///   <item>Waits for <see cref="_boosterReturnDuration"/>.</item>
+    ///   <item>Compacts remaining tray objects left.</item>
+    ///   <item>Clears <see cref="_isMatchAnimating"/> and restores global input.</item>
+    /// </list>
+    /// </summary>
+    private IEnumerator RemoveLastTrayObjectBoosterCoroutine(int slotIndex)
+    {
+        _isMatchAnimating = true;
+        SetGlobalInputBlocked(true);
+
+        DraggableObject obj = _slots[slotIndex];
+        _slots[slotIndex] = null;
+
+        if (obj == null)
+        {
+            Debug.LogWarning(LogPrefix + " Booster coroutine found a null object at slot "
+                             + slotIndex + " — aborting.", this);
+            _isMatchAnimating = false;
+            SetGlobalInputBlocked(false);
+            yield break;
+        }
+
+        Debug.Log(LogPrefix + " Booster removing '" + obj.name
+                  + "' from tray slot " + slotIndex + ".");
+
+        obj.Unlock();
+        obj.MoveBackToBoardFromTray(_boosterReturnPoint.position, _boosterReturnDuration);
+
+        yield return new WaitForSeconds(_boosterReturnDuration);
+
+        yield return StartCoroutine(CompactSlots());
+
+        _isMatchAnimating = false;
+        SetGlobalInputBlocked(false);
+
+        Debug.Log(LogPrefix + " Booster animation complete — input restored.");
+    }
+
+    // ── Booster – Collect Objective Triple to Slot 6 ─────────────────────────
+
+    /// <summary>
+    /// UI entry point for the slot-6 collect-and-merge booster.
+    /// Connect this to a Unity Button OnClick event.
+    /// Delegates all logic to <see cref="TryUseCollectObjectiveTripleToSlot6Booster"/>.
+    /// </summary>
+    public void Button_CollectObjectiveTripleToSlot6Booster()
+    {
+        TryUseCollectObjectiveTripleToSlot6Booster();
+    }
+
+    /// <summary>
+    /// Booster: finds 3 board objects matching the current level objective type and
+    /// flies them one by one directly into tray slot 6 (the rightmost slot), where they
+    /// visually merge and are destroyed. Remaining tray objects then compact left.
+    ///
+    /// This booster does NOT use smart-insert (<see cref="TryAutoPlaceObject"/>).
+    /// Slot 6 is always used as the fixed merge destination regardless of tray contents.
+    ///
+    /// Returns <c>true</c> when the booster sequence was successfully started,
+    /// <c>false</c> when any precondition check failed.
+    ///
+    /// Cancels when:
+    /// <list type="bullet">
+    ///   <item>The game has already failed (<see cref="_isFailed"/>).</item>
+    ///   <item>A tray or merge animation is already running (<see cref="_isMatchAnimating"/>).</item>
+    ///   <item>The objective is complete or not loaded.</item>
+    ///   <item>Fewer than 3 eligible board objects of the required type exist.</item>
+    ///   <item>Tray slot 6 is already occupied by a locked object that is not of the needed type,
+    ///         which would prevent it from being used as the merge destination.</item>
+    /// </list>
+    /// </summary>
+    /// <returns>True if the booster coroutine was started; false if a precondition blocked it.</returns>
+    public bool TryUseCollectObjectiveTripleToSlot6Booster()
+    {
+        if (_isFailed)
+        {
+            Debug.Log(LogPrefix + " Slot-6 merge booster ignored — game has already failed.");
+            return false;
+        }
+
+        if (_isMatchAnimating)
+        {
+            Debug.Log(LogPrefix + " Slot-6 merge booster ignored — animation is in progress.");
+            return false;
+        }
+
+        if (_levelObjectiveManager == null)
+        {
+            Debug.LogWarning(LogPrefix + " Slot-6 merge booster cancelled — LevelObjectiveManager not found.", this);
+            return false;
+        }
+
+        ObjectType objectiveType;
+        if (!_levelObjectiveManager.TryGetCurrentNeededObjectType(out objectiveType))
+        {
+            Debug.Log(LogPrefix + " Slot-6 merge booster cancelled — no needed object type (objective complete or not loaded).");
+            return false;
+        }
+
+        if (_objectSpawner == null)
+        {
+            Debug.LogWarning(LogPrefix + " Slot-6 merge booster cancelled — ObjectSpawner not found.", this);
+            return false;
+        }
+
+        const int Required = 3;
+
+        DraggableObject[] candidates = new DraggableObject[Required];
+        int               found      = 0;
+
+        // ── Priority 1: tray slots, left to right ─────────────────────────────
+        // Prefer objects already seated in the tray. They are already at tray scale
+        // and orientation, so moving them to slot 6 is visually coherent.
+        // Skip slot 6 itself — it is the merge destination and must stay free.
+        for (int i = 0; i < SlotCount - 1 && found < Required; i++)
+        {
+            DraggableObject trayObj = _slots[i];
+            if (trayObj == null)                              continue;
+            if (trayObj.ObjectType != objectiveType)          continue;
+            if (!trayObj.CanBeSelectedFromTrayByBooster())    continue;
+
+            candidates[found] = trayObj;
+            found++;
+        }
+
+        // ── Priority 2: live board objects ─────────────────────────────────────
+        // Fill remaining slots from ObjectSpawner.LiveObjects. Objects already in
+        // the tray (found in any slot) are excluded via FindSlotIndex.
+        var live = _objectSpawner.LiveObjects;
+        for (int i = 0; i < live.Count && found < Required; i++)
+        {
+            DraggableObject candidate = live[i];
+            if (candidate == null)                     continue;
+            if (!candidate.CanBeCollectedByBooster())  continue;
+            if (candidate.ObjectType != objectiveType) continue;
+            if (FindSlotIndex(candidate) >= 0)         continue; // already seated in a tray slot
+
+            candidates[found] = candidate;
+            found++;
+        }
+
+        if (found < Required)
+        {
+            Debug.LogWarning(LogPrefix + " Slot-6 merge booster cancelled — only " + found
+                             + " eligible object(s) of type " + objectiveType
+                             + " (tray + board, need " + Required + ").", this);
+            return false;
+        }
+
+        // ── Slot-6 safety check ────────────────────────────────────────────────
+        // Slot 6 is the exclusive merge destination. It must be empty, or it must
+        // contain one of the 3 already-selected candidates (tray-priority pass above
+        // may have picked it). Any other occupant makes the destination unsafe.
+        const int MergeSlot = SlotCount - 1; // index 6
+        DraggableObject slot6Occupant = _slots[MergeSlot];
+        if (slot6Occupant != null)
+        {
+            bool occupantIsSelected = false;
+            for (int i = 0; i < Required; i++)
+            {
+                if (candidates[i] == slot6Occupant)
+                {
+                    occupantIsSelected = true;
+                    break;
+                }
+            }
+
+            if (!occupantIsSelected)
+            {
+                Debug.LogWarning(LogPrefix + " Slot-6 merge booster cancelled — slot 6 is occupied by '"
+                                 + slot6Occupant.name + "' which is not part of the booster selection."
+                                 + " Clear slot 6 before activating this booster.", this);
+                return false;
+            }
+        }
+
+        StartCoroutine(CollectObjectiveTripleToSlot6BoosterCoroutine(objectiveType, candidates));
+        return true;
+    }
+
+    /// <summary>
+    /// Drives the slot-6 collect-and-merge booster sequence.
+    /// <list type="number">
+    ///   <item>Acquires <see cref="_boosterInputLock"/>, sets <see cref="_isMatchAnimating"/>,
+    ///         and blocks global input.</item>
+    ///   <item>Clears the original tray slot for every selected object that is already seated
+    ///         in the tray, so <c>_slots[]</c> is consistent before any animation starts.</item>
+    ///   <item>Moves each of the 3 selected objects one by one to slot 6 via
+    ///         <see cref="DraggableObject.BoosterMoveToExactSlotAndWait"/>.
+    ///         Registers one objective progress tick immediately after each object arrives.</item>
+    ///   <item>Hides objects [0] and [1] instantly, then pops and shrinks object [2].</item>
+    ///   <item>Destroys all 3 objects and notifies <see cref="ObjectSpawner"/>.</item>
+    ///   <item>Compacts remaining tray objects, then releases the lock and restores input.</item>
+    /// </list>
+    /// Never calls <see cref="TryAutoPlaceObject"/>, <see cref="CheckForTripleMatch"/>,
+    /// or fires <see cref="OnTrayFull"/>.
+    /// </summary>
+    private IEnumerator CollectObjectiveTripleToSlot6BoosterCoroutine(ObjectType neededType, DraggableObject[] selectedObjects)
+    {
+        _boosterInputLock = true;
+        _isMatchAnimating = true;
+        SetGlobalInputBlocked(true);
+
+        Vector3 mergePos = BoosterSlot6Position();
+
+        Debug.Log(LogPrefix + " Collect-triple booster starting — merging 3x " + neededType + " at " + mergePos + ".");
+
+        // ── Step 1: clear original tray slots for all selected objects ────────
+        // Done upfront so _slots[] is consistent before any object starts moving.
+        for (int i = 0; i < selectedObjects.Length; i++)
+        {
+            if (selectedObjects[i] == null) continue;
+
+            int oldSlot = FindSlotIndex(selectedObjects[i]);
+            if (oldSlot >= 0)
+            {
+                _slots[oldSlot] = null;
+                Debug.Log(LogPrefix + " Cleared tray slot " + oldSlot
+                          + " for '" + selectedObjects[i].name + "' before booster move.");
+            }
+        }
+
+        // ── Step 2: move each object to slot 6 one by one ────────────────────
+        for (int i = 0; i < selectedObjects.Length; i++)
+        {
+            DraggableObject obj = selectedObjects[i];
+
+            if (obj == null)
+            {
+                Debug.LogWarning(LogPrefix + " Collect-triple booster: object at index " + i
+                                 + " is null — aborting sequence.", this);
+                _boosterInputLock = false;
+                _isMatchAnimating = false;
+                SetGlobalInputBlocked(false);
+                yield break;
+            }
+
+            Debug.Log(LogPrefix + " Collect-triple booster moving object " + (i + 1)
+                      + "/3: '" + obj.name + "' to slot 6.");
+
+            yield return StartCoroutine(obj.BoosterMoveToExactSlotAndWait(mergePos, obj.AutoMoveDuration));
+
+            // Objective count decreases by 1 as each object arrives, not all at once.
+            _levelObjectiveManager?.RegisterPlacedObject(obj.ObjectType);
+
+            Debug.Log(LogPrefix + " Collect-triple booster object " + (i + 1) + "/3 arrived — objective registered.");
+        }
+
+        // ── Step 3: merge animation at slot 6 ────────────────────────────────
+        // All 3 objects are at mergePos. Hide [0] and [1], pop-and-shrink [2].
+        Debug.Log(LogPrefix + " Collect-triple booster running merge animation.");
+
+        if (selectedObjects[0] != null) selectedObjects[0].HideInstant();
+        if (selectedObjects[1] != null) selectedObjects[1].HideInstant();
+
+        if (selectedObjects[2] != null)
+        {
+            Vector3 popPeakScale = selectedObjects[2].transform.localScale * _popScaleMultiplier;
+            yield return StartCoroutine(selectedObjects[2].PopAndShrink(
+                popPeakScale, _finalShrinkScale, _popUpDuration, _shrinkDuration));
+        }
+
+        if (_destroyDelayAfterShrink > 0f)
+            yield return new WaitForSeconds(_destroyDelayAfterShrink);
+
+        // ── Step 4: destroy and notify spawner ───────────────────────────────
+        Debug.Log(LogPrefix + " Collect-triple booster destroying 3x " + neededType + ".");
+
+        _objectSpawner?.OnObjectsDestroyed(selectedObjects[0], selectedObjects[1], selectedObjects[2]);
+
+        for (int i = 0; i < selectedObjects.Length; i++)
+        {
+            if (selectedObjects[i] != null)
+                Destroy(selectedObjects[i].gameObject);
+        }
+
+        // One frame for Unity to flush Destroy() before compaction reads _slots.
+        yield return null;
+
+        // ── Step 5: compact remaining tray objects ────────────────────────────
+        yield return StartCoroutine(CompactSlots());
+
+        // ── Step 6: release lock and restore input ────────────────────────────
+        _isMatchAnimating = false;
+        _boosterInputLock = false;
+        SetGlobalInputBlocked(false);
+
+        Debug.Log(LogPrefix + " Collect-triple booster complete — input restored.");
+    }
+
     // ── Unity lifecycle ──────────────────────────────────────────────────────
 
     private void Awake()
@@ -250,9 +634,19 @@ public class TrayController : MonoBehaviour
     /// <summary>
     /// Invoked when <see cref="OnTrayFull"/> fires. Sets the permanent fail flag,
     /// blocks all object input, and delegates UI to <see cref="UIManager"/>.
+    ///
+    /// Suppressed while <see cref="_boosterInputLock"/> is active: booster 2 temporarily
+    /// stacks objects at slot 6 without using normal insertion, so <see cref="IsFull"/>
+    /// can appear true mid-sequence even though the tray is not actually full.
     /// </summary>
     private void HandleTrayFull()
     {
+        if (_boosterInputLock)
+        {
+            Debug.Log(LogPrefix + " HandleTrayFull suppressed — booster 2 merge is in progress.");
+            return;
+        }
+
         _isFailed = true;
         SetGlobalInputBlocked(true);
         _uiManager?.OnTrayFull();
@@ -482,9 +876,21 @@ public class TrayController : MonoBehaviour
     /// <summary>
     /// Sets <see cref="DraggableObject.IsInputBlocked"/> on every active
     /// <see cref="DraggableObject"/> in the scene to suppress taps during animation.
+    ///
+    /// When <see cref="_boosterInputLock"/> is active, calls with <c>blocked = false</c>
+    /// are silently ignored. This prevents <see cref="InsertAndPlaceCoroutine"/> and
+    /// <see cref="MergeSequenceCoroutine"/> — which each release input at their own end —
+    /// from opening a gap between booster dispatches where a player tap could sneak through.
+    /// The booster coroutine is the sole authority on releasing input for its sequence.
     /// </summary>
     private void SetGlobalInputBlocked(bool blocked)
     {
+        if (!blocked && _boosterInputLock)
+        {
+            Debug.Log(LogPrefix + " SetGlobalInputBlocked(false) suppressed — booster input lock is active.");
+            return;
+        }
+
         DraggableObject[] all = FindObjectsByType<DraggableObject>(FindObjectsSortMode.None);
         for (int i = 0; i < all.Length; i++)
             all[i].IsInputBlocked = blocked;
@@ -503,10 +909,32 @@ public class TrayController : MonoBehaviour
         return transform.position;
     }
 
+    /// <summary>
+    /// Returns the world-space position of the fixed merge destination used by booster 2.
+    /// All three selected objects move to this position one by one via
+    /// <see cref="DraggableObject.BoosterMoveToExactSlotAndWait"/>.
+    /// Normal slot insertion (<see cref="TryAutoPlaceObject"/>, <see cref="FindInsertSlotIndex"/>)
+    /// is never invoked for this booster.
+    /// </summary>
+    private Vector3 BoosterSlot6Position()
+    {
+        return SlotAnchorPosition(6);
+    }
+
     private int FirstEmptySlotIndex()
     {
         for (int i = 0; i < SlotCount; i++)
             if (_slots[i] == null) return i;
+        return -1;
+    }
+
+    /// <summary>
+    /// Returns the index of the rightmost occupied tray slot, or -1 if all slots are empty.
+    /// </summary>
+    private int LastOccupiedSlotIndex()
+    {
+        for (int i = SlotCount - 1; i >= 0; i--)
+            if (_slots[i] != null) return i;
         return -1;
     }
 
