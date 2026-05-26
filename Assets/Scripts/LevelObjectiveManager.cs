@@ -135,19 +135,23 @@ public class LevelObjectiveManager : MonoBehaviour
     /// when the required count is reached.
     /// </summary>
     /// <param name="objectType">The type of the object that just entered the tray.</param>
-    public void RegisterPlacedObject(ObjectType objectType)
+    public bool RegisterPlacedObject(ObjectType objectType)
     {
         if (_isComplete)
-            return;
+            return false;
 
         if (_activeRequirement == null)
-            return;
+            return false;
 
         if (objectType != _activeRequirement.targetObjectType)
-            return;
+            return false;
 
+        int countBefore = _currentCount;
         _currentCount++;
         _currentCount = Mathf.Min(_currentCount, _activeRequirement.requiredCount);
+
+        if (_currentCount == countBefore)
+            return false;
 
         int remaining = _activeRequirement.requiredCount - _currentCount;
 
@@ -162,6 +166,46 @@ public class LevelObjectiveManager : MonoBehaviour
             Debug.Log("[LevelObjectiveManager] Objective complete.");
             _uiManager?.OnAllObjectsMatched();
         }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Reverses a single <see cref="RegisterPlacedObject"/> call when <paramref name="objectType"/>
+    /// matches the active objective. Called by <see cref="TrayController"/> when booster 1 returns
+    /// an object from the tray back to the gameplay area.
+    /// <para>No-ops when:
+    /// <list type="bullet">
+    ///   <item>The objective is already complete — the win state is never reversed.</item>
+    ///   <item>There is no active requirement.</item>
+    ///   <item><paramref name="objectType"/> does not match the active objective type.</item>
+    ///   <item><see cref="_currentCount"/> is already 0.</item>
+    /// </list>
+    /// </para>
+    /// </summary>
+    /// <param name="objectType">The type of the object being returned to the board.</param>
+    public void UnregisterPlacedObject(ObjectType objectType)
+    {
+        if (_isComplete)
+            return;
+
+        if (_activeRequirement == null)
+            return;
+
+        if (objectType != _activeRequirement.targetObjectType)
+            return;
+
+        if (_currentCount <= 0)
+            return;
+
+        _currentCount--;
+        _currentCount = Mathf.Max(_currentCount, 0);
+
+        int remaining = _activeRequirement.requiredCount - _currentCount;
+        UpdateCountText(remaining);
+
+        Debug.Log($"[LevelObjectiveManager] {_activeRequirement.targetObjectType} count unregistered: " +
+                  $"{_currentCount}/{_activeRequirement.requiredCount}, remaining: {remaining}");
     }
 
     // ── Debug helpers ─────────────────────────────────────────────────────────

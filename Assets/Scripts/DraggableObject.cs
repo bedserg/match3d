@@ -80,6 +80,25 @@ public class DraggableObject : MonoBehaviour
     public bool IsInputBlocked { get; set; }
 
     /// <summary>
+    /// True when this object has already been counted toward the current level objective.
+    /// Used by <see cref="TrayController"/> and <see cref="LevelObjectiveManager"/> to
+    /// prevent double-counting when boosters interact with objects already in the tray.
+    /// </summary>
+    public bool IsCountedForObjective { get; private set; }
+
+    /// <summary>Marks this object as having been counted toward the level objective.</summary>
+    public void MarkCountedForObjective()
+    {
+        IsCountedForObjective = true;
+    }
+
+    /// <summary>Clears the counted state so this object can contribute to the objective again.</summary>
+    public void ClearCountedForObjective()
+    {
+        IsCountedForObjective = false;
+    }
+
+    /// <summary>
     /// Returns true when this object is a valid target for a booster that moves it into the tray.
     /// Combines every precondition that must hold before a booster can safely dispatch this object:
     /// active in hierarchy, not locked in the tray, fully settled, not already auto-moving,

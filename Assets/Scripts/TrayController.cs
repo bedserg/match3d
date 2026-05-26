@@ -319,6 +319,15 @@ public class TrayController : MonoBehaviour
         Debug.Log(LogPrefix + " Booster removing '" + obj.name
                   + "' from tray slot " + slotIndex + ".");
 
+        // If this object was counted toward the objective, reverse that contribution
+        // and clear the flag so it can be counted again if re-inserted.
+        if (obj.IsCountedForObjective)
+        {
+            _levelObjectiveManager?.UnregisterPlacedObject(obj.ObjectType);
+            obj.ClearCountedForObjective();
+            Debug.Log(LogPrefix + " Objective count restored for '" + obj.name + "' — returned to board.");
+        }
+
         obj.Unlock();
         obj.MoveBackToBoardFromTray(_boosterReturnPoint.position, _boosterReturnDuration);
 
@@ -536,10 +545,26 @@ public class TrayController : MonoBehaviour
 
             yield return StartCoroutine(obj.BoosterMoveToExactSlotAndWait(mergePos, obj.AutoMoveDuration));
 
-            // Objective count decreases by 1 as each object arrives, not all at once.
-            _levelObjectiveManager?.RegisterPlacedObject(obj.ObjectType);
-
-            Debug.Log(LogPrefix + " Collect-triple booster object " + (i + 1) + "/3 arrived — objective registered.");
+            // Only register the objective tick if this object has not already been counted.
+            // Tray-priority objects (already in a slot) may have IsCountedForObjective = true.
+            if (!obj.IsCountedForObjective)
+            {
+                bool counted = _levelObjectiveManager != null
+                    && _levelObjectiveManager.RegisterPlacedObject(obj.ObjectType);
+                if (counted)
+                {
+                    obj.MarkCountedForObjective();
+                    Debug.Log(LogPrefix + " Collect-triple booster object " + (i + 1) + "/3 arrived — objective registered.");
+                }
+                else
+                {
+                    Debug.Log(LogPrefix + " Collect-triple booster object " + (i + 1) + "/3 arrived — registration returned false, not marked.");
+                }
+            }
+            else
+            {
+                Debug.Log(LogPrefix + " Collect-triple booster object " + (i + 1) + "/3 arrived — already counted, skipping registration.");
+            }
         }
 
         // ── Step 3: merge animation at slot 6 ────────────────────────────────
@@ -715,7 +740,14 @@ public class TrayController : MonoBehaviour
         obj.Lock(SlotAnchorPosition(insertIndex));
 
         // Notify objective manager now that the object is confirmed in a slot.
-        _levelObjectiveManager?.RegisterPlacedObject(obj.ObjectType);
+        // Skip registration entirely if already counted to prevent double-counting
+        // when a tray object is repositioned by booster logic.
+        if (_levelObjectiveManager != null && !obj.IsCountedForObjective)
+        {
+            bool counted = _levelObjectiveManager.RegisterPlacedObject(obj.ObjectType);
+            if (counted)
+                obj.MarkCountedForObjective();
+        }
 
         Debug.Log(LogPrefix + " '" + obj.name + "' placed into tray slot " + insertIndex
                   + ". Occupied: " + OccupiedCount + "/" + SlotCount);
