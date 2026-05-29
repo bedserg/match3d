@@ -200,7 +200,36 @@ public class DraggableObject : MonoBehaviour
         StopAllCoroutines();
         StartCoroutine(ReturnCoroutine(targetPosition));
     }
+    /// <summary>
+    /// Used by the shuffle booster.
+    /// Gives this board object a small random shake/impulse.
+    /// Does nothing if the object is locked in the tray, not settled, or currently auto-moving.
+    /// </summary>
+    public void ApplyShuffleShake(float horizontalForce, float upwardForce)
+    {
+        if (_isLocked) return;
+        if (!_isSettled) return;
+        if (_isAutoMoving) return;
+        if (IsInputBlocked) return;
+        if (_uiManager != null && _uiManager.IsGameOver) return;
 
+        _rb.isKinematic = false;
+        StopMotion();
+
+        Vector3 randomDirection = new Vector3(
+            Random.Range(-1f, 1f),
+            0f,
+            Random.Range(-1f, 1f)
+        ).normalized;
+
+        Vector3 impulse = randomDirection * horizontalForce;
+        impulse.y = upwardForce;
+
+        _rb.AddForce(impulse, ForceMode.Impulse);
+        _rb.AddTorque(Random.insideUnitSphere * horizontalForce, ForceMode.Impulse);
+
+        Debug.Log($"{LogPrefix} Shuffle shake applied to '{name}'.");
+    }
     /// <summary>
     /// Moves the object from its current tray slot back to the gameplay area over
     /// <paramref name="duration"/> seconds, fully restoring it as an interactive board object:

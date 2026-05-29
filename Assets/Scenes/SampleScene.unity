@@ -1414,7 +1414,7 @@ MonoBehaviour:
       m_Calls:
       - m_Target: {fileID: 2134258459}
         m_TargetAssemblyTypeName: TrayController, Assembly-CSharp
-        m_MethodName: UsePauseTimerBoosterButton
+        m_MethodName: UseShuffleBoosterButton
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
@@ -9910,6 +9910,9 @@ MonoBehaviour:
   _finalShrinkScale: {x: 0, y: 0, z: 0}
   _destroyDelayAfterShrink: 0.03
   _boosterReturnPoint: {fileID: 801212149}
+  _shuffleBoosterAmount: {fileID: 509060801}
+  _shuffleHorizontalForce: 2
+  _shuffleUpwardForce: 0.5
   _boosterReturnDuration: 0.25
   _removeLastBoosterAmount: {fileID: 1898347255}
   _collectTripleBoosterAmount: {fileID: 1990454443}

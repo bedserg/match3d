@@ -75,7 +75,16 @@ public class TrayController : MonoBehaviour
     [Tooltip("Empty GameObject placed in the middle of the gameplay area. " +
              "The removed tray object flies back to this position. Must be assigned.")]
     [SerializeField] private Transform _boosterReturnPoint;
+    [Header("Booster – Shuffle Objects")]
 
+    [Tooltip("Tracks remaining uses for the shuffle booster. Assign the BoosterAmountManager on the Shuffle Booster UI object.")]
+    [SerializeField] private BoosterAmountManager _shuffleBoosterAmount;
+
+    [Tooltip("Horizontal impulse strength applied to board objects when shuffle booster is used.")]
+    [SerializeField] private float _shuffleHorizontalForce = 2f;
+
+    [Tooltip("Small upward impulse applied to board objects when shuffle booster is used.")]
+    [SerializeField] private float _shuffleUpwardForce = 0.5f;
     [Tooltip("Seconds to wait for the removed object's return animation before compacting. " +
              "Should match the DraggableObject._returnDuration on your prefabs (default 0.25 s).")]
     [SerializeField] private float _boosterReturnDuration = 0.25f;
@@ -239,6 +248,50 @@ public class TrayController : MonoBehaviour
         int insertIndex = FindInsertSlotIndex(obj.ObjectType);
         StartCoroutine(InsertAndPlaceCoroutine(obj, insertIndex));
         return true;
+    }
+    /// <summary>
+    /// UI entry point for the shuffle booster.
+    /// Connect this to the Shuffle booster button's OnClick event.
+    /// </summary>
+    public void UseShuffleBoosterButton()
+    {
+        if (_isFailed)
+        {
+            Debug.Log(LogPrefix + " Shuffle booster ignored — game has already failed.");
+            return;
+        }
+
+        if (_uiManager != null && _uiManager.IsGameOver)
+        {
+            Debug.Log(LogPrefix + " Shuffle booster ignored — game is over.");
+            return;
+        }
+
+        if (_isMatchAnimating)
+        {
+            Debug.Log(LogPrefix + " Shuffle booster ignored — tray animation is in progress.");
+            return;
+        }
+
+        if (_shuffleBoosterAmount != null && !_shuffleBoosterAmount.TryConsumeBooster())
+            return;
+
+        DraggableObject[] allObjects = FindObjectsByType<DraggableObject>(FindObjectsSortMode.None);
+
+        int shuffledCount = 0;
+
+        foreach (DraggableObject obj in allObjects)
+        {
+            if (obj == null) continue;
+            if (obj.IsLocked) continue;
+            if (!obj.IsSettled) continue;
+            if (obj.IsAutoMoving) continue;
+
+            obj.ApplyShuffleShake(_shuffleHorizontalForce, _shuffleUpwardForce);
+            shuffledCount++;
+        }
+
+        Debug.Log(LogPrefix + " Shuffle booster used. Shuffled objects: " + shuffledCount);
     }
     /// <summary>
     /// UI entry point for the pause-timer booster.
