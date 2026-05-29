@@ -75,6 +75,14 @@ public class TrayController : MonoBehaviour
     [Tooltip("Empty GameObject placed in the middle of the gameplay area. " +
              "The removed tray object flies back to this position. Must be assigned.")]
     [SerializeField] private Transform _boosterReturnPoint;
+    [Tooltip("Seconds to wait for the removed object's return animation before compacting. " +
+            "Should match the DraggableObject._returnDuration on your prefabs (default 0.25 s).")]
+    [SerializeField] private float _boosterReturnDuration = 0.25f;
+
+    [Tooltip("Tracks remaining uses for the remove-last-object booster. " +
+             "Assign the BoosterAmountManager on the Booster 1 UI object.")]
+    [SerializeField] private BoosterAmountManager _removeLastBoosterAmount;
+
     [Header("Booster – Shuffle Objects")]
 
     [Tooltip("Tracks remaining uses for the shuffle booster. Assign the BoosterAmountManager on the Shuffle Booster UI object.")]
@@ -85,14 +93,7 @@ public class TrayController : MonoBehaviour
 
     [Tooltip("Small upward impulse applied to board objects when shuffle booster is used.")]
     [SerializeField] private float _shuffleUpwardForce = 0.5f;
-    [Tooltip("Seconds to wait for the removed object's return animation before compacting. " +
-             "Should match the DraggableObject._returnDuration on your prefabs (default 0.25 s).")]
-    [SerializeField] private float _boosterReturnDuration = 0.25f;
-
-    [Tooltip("Tracks remaining uses for the remove-last-object booster. " +
-             "Assign the BoosterAmountManager on the Booster 1 UI object.")]
-    [SerializeField] private BoosterAmountManager _removeLastBoosterAmount;
-
+   
     [Header("Booster – Collect Objective Triple")]
 
     [Tooltip("Tracks remaining uses for the collect-triple booster. " +
