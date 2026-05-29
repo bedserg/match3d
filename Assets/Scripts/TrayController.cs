@@ -80,7 +80,23 @@ public class TrayController : MonoBehaviour
              "Should match the DraggableObject._returnDuration on your prefabs (default 0.25 s).")]
     [SerializeField] private float _boosterReturnDuration = 0.25f;
 
+    [Tooltip("Tracks remaining uses for the remove-last-object booster. " +
+             "Assign the BoosterAmountManager on the Booster 1 UI object.")]
+    [SerializeField] private BoosterAmountManager _removeLastBoosterAmount;
+
     [Header("Booster – Collect Objective Triple")]
+
+    [Tooltip("Tracks remaining uses for the collect-triple booster. " +
+             "Assign the BoosterAmountManager on the Booster 2 UI object.")]
+    [SerializeField] private BoosterAmountManager _collectTripleBoosterAmount;
+
+    [Header("Booster – Pause Timer")]
+
+    [Tooltip("Tracks remaining uses for the pause-timer booster. " +
+             "Assign the BoosterAmountManager on the Booster 3 UI object.")]
+    [SerializeField] private BoosterAmountManager _pauseTimerBoosterAmount;
+    [Tooltip("How many seconds the timer should stop when this booster is used.")]
+    [SerializeField] private float _pauseTimerDuration = 5f;
 
     private readonly DraggableObject[] _slots = new DraggableObject[SlotCount];
 
@@ -224,65 +240,107 @@ public class TrayController : MonoBehaviour
         StartCoroutine(InsertAndPlaceCoroutine(obj, insertIndex));
         return true;
     }
-
     /// <summary>
-    /// UI entry point for the remove-last-object booster. Connect this to a Unity Button OnClick event.
-    /// Delegates all logic to <see cref="TryUseRemoveLastTrayObjectBooster"/>.
+    /// UI entry point for the pause-timer booster.
+    /// Connect this to the Pause Timer booster button's OnClick event.
     /// </summary>
-    public void UseRemoveLastTrayObjectBoosterButton()
+    public void UsePauseTimerBoosterButton()
     {
-        TryUseRemoveLastTrayObjectBooster();
-    }
-
-    /// <summary>
-    /// Booster: removes the object from the rightmost occupied tray slot and
-    /// animates it back to the gameplay area. Remaining tray objects compact left.
-    ///
-    /// No-ops when:
-    /// <list type="bullet">
-    ///   <item>The tray is empty.</item>
-    ///   <item>The game has already failed (<see cref="_isFailed"/>).</item>
-    ///   <item>A tray or merge animation is already running (<see cref="_isMatchAnimating"/>).</item>
-    /// </list>
-    /// Blocks all draggable-object input for the duration of the animation and
-    /// restores it once compaction completes.
-    /// </summary>
-    private void TryUseRemoveLastTrayObjectBooster()
-    {
-        if (IsEmpty)
+        if (_isFailed)
         {
-            Debug.Log(LogPrefix + " Booster ignored — tray is empty.");
+            Debug.Log(LogPrefix + " Pause-timer booster ignored — game has already failed.");
             return;
         }
 
+        if (_uiManager != null && _uiManager.IsGameOver)
+        {
+            Debug.Log(LogPrefix + " Pause-timer booster ignored — game is over.");
+            return;
+        }
+
+        if (_uiManager == null)
+        {
+            Debug.LogWarning(LogPrefix + " Pause-timer booster cancelled — UIManager is not assigned.", this);
+            return;
+        }
+
+        if (_pauseTimerBoosterAmount != null && !_pauseTimerBoosterAmount.TryConsumeBooster())
+            return;
+
+        _uiManager.PauseTimerForSeconds(_pauseTimerDuration);
+
+        Debug.Log(LogPrefix + " Pause-timer booster used for " + _pauseTimerDuration + " seconds.");
+    }
+
+    /// <summary>
+    /// UI entry point for the remove-last-object booster. Connect this to a Unity Button OnClick event.
+    /// Validates preconditions via <see cref="CanUseRemoveLastTrayObjectBooster"/> before consuming
+    /// a use, so the count is never decremented when the booster cannot actually run.
+    /// </summary>
+
+    public void UseRemoveLastTrayObjectBoosterButton()
+    {
+        int lastIndex;
+        if (!CanUseRemoveLastTrayObjectBooster(out lastIndex))
+            return;
+
+        if (_removeLastBoosterAmount != null && !_removeLastBoosterAmount.TryConsumeBooster())
+            return;
+
+        StartCoroutine(RemoveLastTrayObjectBoosterCoroutine(lastIndex));
+    }
+
+    /// <summary>
+    /// Checks every precondition required to run the remove-last-object booster.
+    /// No state is mutated; this method is purely a query.
+    /// </summary>
+    /// <param name="lastIndex">
+    /// When the method returns <c>true</c>, contains the index of the rightmost occupied tray slot.
+    /// Set to <c>-1</c> on failure.
+    /// </param>
+    /// <returns><c>true</c> when all preconditions are satisfied; <c>false</c> otherwise.</returns>
+    private bool CanUseRemoveLastTrayObjectBooster(out int lastIndex)
+    {
+        lastIndex = -1;
+
         if (_isFailed)
         {
-            Debug.Log(LogPrefix + " Booster ignored — game has already failed.");
-            return;
+            Debug.Log(LogPrefix + " Booster 1 ignored — game has already failed.");
+            return false;
+        }
+
+        if (_uiManager != null && _uiManager.IsGameOver)
+        {
+            Debug.Log(LogPrefix + " Booster 1 ignored — game is over.");
+            return false;
         }
 
         if (_isMatchAnimating)
         {
-            Debug.Log(LogPrefix + " Booster ignored — animation is in progress.");
-            return;
+            Debug.Log(LogPrefix + " Booster 1 ignored — animation is in progress.");
+            return false;
         }
 
-        // Find the rightmost occupied slot.
-        int lastIndex = LastOccupiedSlotIndex();
+        if (IsEmpty)
+        {
+            Debug.Log(LogPrefix + " Booster 1 ignored — tray is empty.");
+            return false;
+        }
 
+        lastIndex = LastOccupiedSlotIndex();
         if (lastIndex < 0)
         {
-            Debug.Log(LogPrefix + " Booster ignored — no occupied slot found.");
-            return;
+            Debug.Log(LogPrefix + " Booster 1 ignored — no occupied slot found.");
+            return false;
         }
 
         if (_boosterReturnPoint == null)
         {
-            Debug.LogWarning(LogPrefix + " Booster cancelled — _boosterReturnPoint is not assigned.", this);
-            return;
+            Debug.LogWarning(LogPrefix + " Booster 1 cancelled — _boosterReturnPoint is not assigned.", this);
+            return false;
         }
 
-        StartCoroutine(RemoveLastTrayObjectBoosterCoroutine(lastIndex));
+        return true;
     }
 
     /// <summary>
@@ -346,40 +404,50 @@ public class TrayController : MonoBehaviour
     /// <summary>
     /// UI entry point for the slot-6 collect-and-merge booster.
     /// Connect this to a Unity Button OnClick event.
-    /// Delegates all logic to <see cref="TryUseCollectObjectiveTripleToSlot6Booster"/>.
+    /// Validates preconditions via <see cref="CanUseCollectTripleToSlot6Booster"/> before consuming
+    /// a use, so the count is never decremented when the booster cannot actually run.
     /// </summary>
     public void Button_CollectObjectiveTripleToSlot6Booster()
     {
-        TryUseCollectObjectiveTripleToSlot6Booster();
+        ObjectType        objectiveType;
+        DraggableObject[] selectedObjects;
+
+        if (!CanUseCollectTripleToSlot6Booster(out objectiveType, out selectedObjects))
+            return;
+
+        if (_collectTripleBoosterAmount != null && !_collectTripleBoosterAmount.TryConsumeBooster())
+            return;
+
+        StartCoroutine(CollectObjectiveTripleToSlot6BoosterCoroutine(objectiveType, selectedObjects));
     }
 
     /// <summary>
-    /// Booster: finds 3 board objects matching the current level objective type and
-    /// flies them one by one directly into tray slot 6 (the rightmost slot), where they
-    /// visually merge and are destroyed. Remaining tray objects then compact left.
-    ///
-    /// This booster does NOT use smart-insert (<see cref="TryAutoPlaceObject"/>).
-    /// Slot 6 is always used as the fixed merge destination regardless of tray contents.
-    ///
-    /// Returns <c>true</c> when the booster sequence was successfully started,
-    /// <c>false</c> when any precondition check failed.
-    ///
-    /// Cancels when:
-    /// <list type="bullet">
-    ///   <item>The game has already failed (<see cref="_isFailed"/>).</item>
-    ///   <item>A tray or merge animation is already running (<see cref="_isMatchAnimating"/>).</item>
-    ///   <item>The objective is complete or not loaded.</item>
-    ///   <item>Fewer than 3 eligible board objects of the required type exist.</item>
-    ///   <item>Tray slot 6 is already occupied by a locked object that is not of the needed type,
-    ///         which would prevent it from being used as the merge destination.</item>
-    /// </list>
+    /// Checks every precondition required to run the slot-6 collect-and-merge booster and,
+    /// when all pass, resolves the 3 eligible objects that the coroutine will animate.
+    /// No state is mutated; this method is purely a query.
     /// </summary>
-    /// <returns>True if the booster coroutine was started; false if a precondition blocked it.</returns>
-    public bool TryUseCollectObjectiveTripleToSlot6Booster()
+    /// <param name="objectiveType">
+    /// When the method returns <c>true</c>, contains the <see cref="ObjectType"/> that must be collected.
+    /// </param>
+    /// <param name="selectedObjects">
+    /// When the method returns <c>true</c>, contains exactly 3 <see cref="DraggableObject"/> instances
+    /// selected for the merge sequence (tray-priority order).
+    /// </param>
+    /// <returns><c>true</c> when all preconditions are satisfied; <c>false</c> otherwise.</returns>
+    private bool CanUseCollectTripleToSlot6Booster(out ObjectType objectiveType, out DraggableObject[] selectedObjects)
     {
+        objectiveType   = default;
+        selectedObjects = null;
+
         if (_isFailed)
         {
             Debug.Log(LogPrefix + " Slot-6 merge booster ignored — game has already failed.");
+            return false;
+        }
+
+        if (_uiManager != null && _uiManager.IsGameOver)
+        {
+            Debug.Log(LogPrefix + " Slot-6 merge booster ignored — game is over.");
             return false;
         }
 
@@ -395,7 +463,6 @@ public class TrayController : MonoBehaviour
             return false;
         }
 
-        ObjectType objectiveType;
         if (!_levelObjectiveManager.TryGetCurrentNeededObjectType(out objectiveType))
         {
             Debug.Log(LogPrefix + " Slot-6 merge booster cancelled — no needed object type (objective complete or not loaded).");
@@ -479,7 +546,7 @@ public class TrayController : MonoBehaviour
             }
         }
 
-        StartCoroutine(CollectObjectiveTripleToSlot6BoosterCoroutine(objectiveType, candidates));
+        selectedObjects = candidates;
         return true;
     }
 

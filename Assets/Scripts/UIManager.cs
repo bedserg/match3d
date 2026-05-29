@@ -49,6 +49,10 @@ public class UIManager : MonoBehaviour
     [Tooltip("How long one full red-to-white fade cycle takes, in seconds.")]
     public float flashCycleDuration = 1f;
 
+    [Header("Booster Settings")]
+    [Tooltip("Default duration in seconds the timer is frozen by the timer-freeze booster.")]
+    [SerializeField] private float _defaultTimerPauseDuration = 5f;
+
     // ── Private state ────────────────────────────────────────────────────────
 
     /// Total remaining time in seconds.
@@ -59,6 +63,15 @@ public class UIManager : MonoBehaviour
 
     /// Set to true when the player wins before time is up, to skip the time-is-up panel.
     private bool isGameOver;
+
+    /// True while the timer is frozen by the timer-freeze booster.
+    private bool _isTimerPausedByBooster;
+
+    /// Cached reference to the active booster-pause coroutine so it can be restarted or cancelled.
+    private Coroutine _timerPauseCoroutine;
+
+    /// Cached reference to the countdown coroutine so it can be stopped explicitly during a booster pause.
+    private Coroutine _countdownCoroutine;
 
     // ── Public state ─────────────────────────────────────────────────────────
 
@@ -98,7 +111,7 @@ public class UIManager : MonoBehaviour
         isGameOver = false;
 
         // Kick off the per-second tick.
-        StartCoroutine(CountdownCoroutine());
+        _countdownCoroutine = StartCoroutine(CountdownCoroutine());
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -118,6 +131,7 @@ public class UIManager : MonoBehaviour
         isGameOver = true;
         isRunning  = false;
 
+        StopBoosterPause();
         StopFlash();
         UpdateTimerDisplay();
 
@@ -142,6 +156,7 @@ public class UIManager : MonoBehaviour
         isGameOver = true;
         isRunning  = false;
 
+        StopBoosterPause();
         StopFlash();
         UpdateTimerDisplay();
 
@@ -172,6 +187,7 @@ public class UIManager : MonoBehaviour
         isGameOver = true;
         isRunning  = false;
 
+        StopBoosterPause();
         StopFlash();
         UpdateTimerDisplay();
 
@@ -193,6 +209,40 @@ public class UIManager : MonoBehaviour
     {
         isRunning = false;
         StopFlash();
+    }
+
+    /// <summary>
+    /// Freezes the countdown timer for <paramref name="duration"/> seconds.
+    /// If a booster pause is already active, it is restarted from the beginning.
+    /// Does nothing if the game is already over.
+    /// The time-is-up window is suppressed for the duration of the pause.
+    /// </summary>
+    /// <param name="duration">Seconds to freeze the timer. Pass <see cref="_defaultTimerPauseDuration"/> for the default.</param>
+    public void PauseTimerForSeconds(float duration)
+    {
+        if (isGameOver) return;
+
+        // Restart an already-active booster pause from scratch.
+        if (_timerPauseCoroutine != null)
+        {
+            StopCoroutine(_timerPauseCoroutine);
+            _timerPauseCoroutine = null;
+        }
+
+        // Stop the countdown coroutine explicitly so no tick fires and no end-game
+        // path is triggered while the timer is frozen.
+        if (_countdownCoroutine != null)
+        {
+            StopCoroutine(_countdownCoroutine);
+            _countdownCoroutine = null;
+        }
+
+        isRunning = false;
+        _isTimerPausedByBooster = true;
+
+        _timerPauseCoroutine = StartCoroutine(TimerPauseCoroutine(duration));
+
+        Debug.Log($"[UIManager] Timer frozen for {duration}s.");
     }
 
     /// <summary>
@@ -318,6 +368,43 @@ public class UIManager : MonoBehaviour
 
        // if (timerText != null)
           //  timerText.color = ColorWhite;
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Booster logic
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Waits for <paramref name="duration"/> seconds, then resumes the countdown
+    /// — but only if no end-game condition has been reached in the meantime.
+    /// </summary>
+    private IEnumerator TimerPauseCoroutine(float duration)
+    {
+        yield return new WaitForSeconds(duration);
+
+        _isTimerPausedByBooster = false;
+        _timerPauseCoroutine = null;
+
+        if (!isGameOver)
+        {
+            isRunning = true;
+            _countdownCoroutine = StartCoroutine(CountdownCoroutine());
+            Debug.Log("[UIManager] Timer resumed after freeze.");
+        }
+    }
+
+    /// <summary>
+    /// Cancels any active booster-pause coroutine and resets the booster state.
+    /// </summary>
+    private void StopBoosterPause()
+    {
+        if (_timerPauseCoroutine != null)
+        {
+            StopCoroutine(_timerPauseCoroutine);
+            _timerPauseCoroutine = null;
+        }
+
+        _isTimerPausedByBooster = false;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
