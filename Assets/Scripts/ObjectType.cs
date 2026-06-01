@@ -27,6 +27,9 @@ public enum ObjectType
    LavenderMacaron,
    PinkCupcake,
    CandyMoon,
-   MintBlossom
+   MintBlossom,
+   Bubbletea,
+   Croissant,
+   Chick
       
 }
