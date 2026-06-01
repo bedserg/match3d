@@ -17,6 +17,16 @@ public enum ObjectType
    PinkBalloonFlower,
    BlushBunny,
    BlossomDonut,
-   Coconut
+   Coconut,
+   BandagedHeart,
+   BlueSprinklesIcecream,
+   GlazedCinnamonRoll,
+   PastelHeartCandy,
+   PastelSwirlLollipop,
+   BlossomCherry,
+   LavenderMacaron,
+   PinkCupcake,
+   CandyMoon,
+   MintBlossom
       
 }

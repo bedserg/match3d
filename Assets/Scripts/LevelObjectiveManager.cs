@@ -80,7 +80,15 @@ public class LevelObjectiveManager : MonoBehaviour
             return _activeObjectives[0].targetObjectType;
         }
     }
+    public bool IsComplete => _isComplete;
 
+    public void ShowLevelUpIfComplete()
+    {
+        if (!_isComplete)
+            return;
+
+        _uiManager?.OnAllObjectsMatched();
+    }
     public bool TryGetCurrentNeededObjectType(out ObjectType neededType)
     {
         neededType = default;
@@ -275,10 +283,61 @@ public class LevelObjectiveManager : MonoBehaviour
             return;
 
         ObjectiveSlotUI slot = _objectiveSlots[slotIndex];
-        if (slot == null || slot.amountText == null)
+        if (slot == null)
             return;
 
-        slot.amountText.text = remaining.ToString();
+        if (slot.amountText != null)
+            slot.amountText.text = remaining.ToString();
+
+        if (remaining <= 0)
+        {
+            if (slot.root != null)
+                slot.root.SetActive(false);
+
+            RefreshObjectiveUIPositions();
+        }
+    }
+    private void RefreshObjectiveUIPositions()
+    {
+        if (_activeObjectives == null || _currentCounts == null || _objectiveSlots == null)
+            return;
+
+        // Hide all UI slots first.
+        HideAllObjectiveSlots();
+
+        int visibleSlotIndex = 0;
+
+        for (int objectiveIndex = 0; objectiveIndex < _activeObjectives.Length; objectiveIndex++)
+        {
+            ObjectiveRequirement objective = _activeObjectives[objectiveIndex];
+            if (objective == null)
+                continue;
+
+            int remaining = objective.requiredCount - _currentCounts[objectiveIndex];
+
+            // Skip completed objectives.
+            if (remaining <= 0)
+                continue;
+
+            // No more UI boxes available.
+            if (visibleSlotIndex >= _objectiveSlots.Length)
+                break;
+
+            ObjectiveSlotUI slot = _objectiveSlots[visibleSlotIndex];
+            if (slot == null)
+                continue;
+
+            if (slot.root != null)
+                slot.root.SetActive(true);
+
+            if (slot.iconImage != null)
+                slot.iconImage.sprite = objective.targetIcon;
+
+            if (slot.amountText != null)
+                slot.amountText.text = remaining.ToString();
+
+            visibleSlotIndex++;
+        }
     }
 
     private void HideAllObjectiveSlots()
@@ -309,8 +368,11 @@ public class LevelObjectiveManager : MonoBehaviour
         }
 
         _isComplete = true;
-        Debug.Log("[LevelObjectiveManager] All objectives complete.");
-        _uiManager?.OnAllObjectsMatched();
+
+        // Stop timer immediately so TimeIsUp cannot appear while final merge animation is playing.
+        _uiManager?.StopTimer();
+
+        Debug.Log("[LevelObjectiveManager] All objectives complete — waiting for merge animation before showing LevelUpWindow.");
     }
 
     private void ValidateObjective(int levelNumber, ObjectiveRequirement objective)

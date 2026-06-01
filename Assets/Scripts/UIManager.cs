@@ -208,8 +208,16 @@ public class UIManager : MonoBehaviour
     public void StopTimer()
     {
         isRunning = false;
+
+        if (_countdownCoroutine != null)
+        {
+            StopCoroutine(_countdownCoroutine);
+            _countdownCoroutine = null;
+        }
+
         StopFlash();
     }
+
 
     /// <summary>
     /// Freezes the countdown timer for <paramref name="duration"/> seconds.

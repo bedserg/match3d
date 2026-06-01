@@ -722,7 +722,20 @@ public class TrayController : MonoBehaviour
         // ── Step 5: compact remaining tray objects ────────────────────────────
         yield return StartCoroutine(CompactSlots());
 
-        // ── Step 6: release lock and restore input ────────────────────────────
+        // ── Step 6: after booster merge is fully finished, show win if needed ────────
+        if (_levelObjectiveManager != null && _levelObjectiveManager.IsComplete)
+        {
+            _isMatchAnimating = false;
+            _boosterInputLock = false;
+
+            // Keep input blocked, then open Level Up.
+            _levelObjectiveManager.ShowLevelUpIfComplete();
+
+            Debug.Log(LogPrefix + " Collect-triple booster complete — level complete, showing LevelUpWindow.");
+            yield break;
+        }
+
+        // ── Step 7: release lock and restore input only if level is not complete ─────
         _isMatchAnimating = false;
         _boosterInputLock = false;
         SetGlobalInputBlocked(false);
@@ -1191,7 +1204,19 @@ public class TrayController : MonoBehaviour
         // ── Phase 5: compact surviving objects to the left ─────────────────────
         yield return StartCoroutine(CompactSlots());
 
-        // ── Phase 6: restore input ─────────────────────────────────────────────
+        // ── Phase 6: after merge animation is fully finished, show win if needed ─────
+        if (_levelObjectiveManager != null && _levelObjectiveManager.IsComplete)
+        {
+            _isMatchAnimating = false;
+
+            // Keep input blocked visually, then open Level Up.
+            _levelObjectiveManager.ShowLevelUpIfComplete();
+
+            Debug.Log(LogPrefix + " Merge animation complete — level complete, showing LevelUpWindow.");
+            yield break;
+        }
+
+        // ── Phase 7: restore input only if level is not complete ─────────────────────
         _isMatchAnimating = false;
         SetGlobalInputBlocked(false);
         Debug.Log(LogPrefix + " Merge animation complete - input restored.");
