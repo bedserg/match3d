@@ -30,6 +30,7 @@ public enum ObjectType
    MintBlossom,
    Bubbletea,
    Croissant,
-   Chick
+   Chick,
+   SliceStrawberryCake
       
 }
