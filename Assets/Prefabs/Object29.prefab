@@ -44,8 +44,8 @@ Rigidbody:
   m_GameObject: {fileID: 7846349642310640954}
   serializedVersion: 4
   m_Mass: 1
-  m_Drag: 0
-  m_AngularDrag: 0.05
+  m_Drag: 2
+  m_AngularDrag: 2
   m_CenterOfMass: {x: 0, y: 0, z: 0}
   m_InertiaTensor: {x: 1, y: 1, z: 1}
   m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
@@ -100,8 +100,8 @@ CapsuleCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 2
-  m_Radius: 0.4618909
-  m_Height: 1.8222121
+  m_Radius: 0.52
+  m_Height: 2.17
   m_Direction: 0
   m_Center: {x: -0.033481717, y: 0.022983316, z: -0.020441711}
 --- !u!1001 &5816856621194987012

@@ -45,8 +45,8 @@ Rigidbody:
   m_GameObject: {fileID: 4914809246968934652}
   serializedVersion: 4
   m_Mass: 1
-  m_Drag: 1.5
-  m_AngularDrag: 5
+  m_Drag: 2
+  m_AngularDrag: 2
   m_CenterOfMass: {x: 0, y: 0, z: 0}
   m_InertiaTensor: {x: 1, y: 1, z: 1}
   m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
@@ -110,14 +110,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _objectType: 5
-  _followSpeed: 20
   _maxIdleSpeed: 1.5
   _returnDuration: 0.25
-  _useDragBounds: 1
-  _minX: -3.4
-  _maxX: 3.4
-  _minZ: -5.9
-  _maxZ: 5.9
+  _autoMoveDuration: 0.25
+  _tray: {fileID: 0}
+  _trayScale: {x: 0.55, y: 0.55, z: 0.55}
+  _trayRotation: {x: 0, y: 0, z: 0}
 --- !u!1001 &7641940767119572118
 PrefabInstance:
   m_ObjectHideFlags: 0
